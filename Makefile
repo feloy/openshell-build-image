@@ -31,13 +31,8 @@ BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 # Runtime for `make run`. The vm one has a target of its own.
 RUNTIME ?= podman
 
-# krun-sys generates its bindings with bindgen, which needs libclang. Prefer a
-# Homebrew llvm, else the copy every Xcode Command Line Tools install carries.
-ifneq ($(wildcard $(BREW_PREFIX)/opt/llvm/lib),)
+# krun-sys generates its bindings with bindgen, which needs Homebrew libclang.
 LIBCLANG_PATH := $(BREW_PREFIX)/opt/llvm/lib
-else
-LIBCLANG_PATH := $(shell xcode-select -p 2>/dev/null)/usr/lib
-endif
 
 # Everything that compiles the FFI code needs these: bindgen has to find
 # libclang, and the linker has to find libkrun through pkg-config.

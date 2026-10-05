@@ -90,23 +90,19 @@ jobs:
       # Only for the vm target. The compile guard in vm-runtime.yml runs the
       # same install on every pull request, so a tap that stops publishing a
       # bottle for this runner shows up there rather than in a release.
-      - name: Install libkrun
+      - name: Install VM build dependencies
         if: matrix.vm == true
         run: |
           brew tap libkrun/krun
           brew trust libkrun/krun
-          brew install libkrun/krun/libkrun pkgconf
+          brew install libkrun/krun/libkrun pkgconf llvm
 
       - name: Set build environment
         if: matrix.vm == true
         run: |
           PREFIX=$(brew --prefix)
           # krun-sys generates its bindings with bindgen, which needs libclang.
-          if [ -d "$PREFIX/opt/llvm/lib" ]; then
-            LIBCLANG="$PREFIX/opt/llvm/lib"
-          else
-            LIBCLANG="$(xcode-select -p)/usr/lib"
-          fi
+          LIBCLANG="$PREFIX/opt/llvm/lib"
           echo "LIBCLANG_PATH=$LIBCLANG" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$LIBCLANG:$PREFIX/lib" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"

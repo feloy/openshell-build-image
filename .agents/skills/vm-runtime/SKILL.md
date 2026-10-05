@@ -16,7 +16,7 @@ How a VM build works, in one paragraph: the binary unpacks a Linux root filesyst
 Four things must be true before a VM build can run:
 
 1. It is an **Apple Silicon Mac** — libkrun uses Apple's Hypervisor.framework.
-2. **libkrun is installed** (`brew install libkrun/krun/libkrun`) — the binary links against it rather than bundling it.
+2. **libkrun, pkgconf, and LLVM are installed** (`brew install libkrun/krun/libkrun pkgconf llvm`) — the binary links against libkrun, and bindgen uses LLVM's libclang while compiling.
 3. The binary was **built with `--features vm`** (off by default; it links against libkrun).
 4. The binary was **signed with the hypervisor entitlement** — re-signed after every rebuild, since building clears the signature.
 
@@ -29,7 +29,7 @@ The root filesystem is not a fifth requirement: a release binary carries its own
 ### Run a VM build
 
 ```bash
-export LIBCLANG_PATH="$(xcode-select -p)/usr/lib"
+export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
 export DYLD_FALLBACK_LIBRARY_PATH="$LIBCLANG_PATH:$(brew --prefix)/lib"
 export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
 

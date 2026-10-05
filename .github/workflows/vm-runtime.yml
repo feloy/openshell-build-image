@@ -32,9 +32,8 @@ name: VM Runtime
 #
 #    Install the build prerequisites on it once:
 #      brew tap libkrun/krun && brew trust libkrun/krun
-#      brew install libkrun/krun/libkrun pkgconf
-#    Compiling also needs libclang, from either `brew install llvm` or the
-#    Xcode Command Line Tools.
+#      brew install libkrun/krun/libkrun pkgconf llvm
+#    LLVM supplies libclang for bindgen when compiling the VM feature.
 #
 # 2. Environment with required reviewers (Settings → Environments → New environment)
 #    Name: integration
@@ -81,11 +80,12 @@ jobs:
           toolchain: stable
           components: clippy
 
-      - name: Install libkrun
+      - name: Install VM build dependencies
         run: |
           brew tap libkrun/krun
           brew trust libkrun/krun
-          brew install libkrun/krun/libkrun pkgconf
+          # libkrun no longer pulls in llvm, but bindgen still needs libclang.
+          brew install libkrun/krun/libkrun pkgconf llvm
 
       # The tap publishes libkrunfw bottles for a fixed set of macOS versions.
       # Off that set Homebrew builds from source, and building libkrunfw means
@@ -106,13 +106,7 @@ jobs:
         run: |
           PREFIX=$(brew --prefix)
           # krun-sys generates its bindings with bindgen, which needs libclang.
-          # Prefer a Homebrew llvm, else fall back to the Command Line Tools
-          # copy that every Xcode install provides.
-          if [ -d "$PREFIX/opt/llvm/lib" ]; then
-            LIBCLANG="$PREFIX/opt/llvm/lib"
-          else
-            LIBCLANG="$(xcode-select -p)/usr/lib"
-          fi
+          LIBCLANG="$PREFIX/opt/llvm/lib"
           echo "LIBCLANG_PATH=$LIBCLANG" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$LIBCLANG:$PREFIX/lib" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
@@ -190,11 +184,7 @@ jobs:
       - name: Set build environment
         run: |
           PREFIX=$(brew --prefix)
-          if [ -d "$PREFIX/opt/llvm/lib" ]; then
-            LIBCLANG="$PREFIX/opt/llvm/lib"
-          else
-            LIBCLANG="$(xcode-select -p)/usr/lib"
-          fi
+          LIBCLANG="$PREFIX/opt/llvm/lib"
           echo "LIBCLANG_PATH=$LIBCLANG" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$LIBCLANG:$PREFIX/lib" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
