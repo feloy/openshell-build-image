@@ -17,6 +17,112 @@
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
+// Exercise CLI staging with an isolated host HOME and a fake runtime.
+#[cfg(unix)]
+mod copy_containerfile_cli {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn stages_exact_containerfile_without_modifying_host_home() {
+        for enabled in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = fedora_config_dir();
+            let runtime = dir.path().join("podman");
+            std::fs::write(
+                &runtime,
+                r#"#!/bin/sh
+/bin/cat "$3" > "$TEST_CAPTURE_FILE"
+for context do :; done
+if [ -f "$context/build-containerfile" ]; then
+    /bin/cp "$context/build-containerfile" "$TEST_STAGED_FILE"
+fi
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let host_copy = dir.path().join("Containerfile");
+            std::fs::write(&host_copy, "keep host file").unwrap();
+            let used = dir.path().join("used-containerfile");
+            let staged = dir.path().join("staged-containerfile");
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_openshell-build-image"));
+            cmd.args(["--runtime", "podman", "--disable-ssl-certs", "test:copy"])
+                .arg("--config")
+                .arg(config.path())
+                .current_dir(dir.path())
+                .env("HOME", dir.path())
+                .env("PATH", dir.path())
+                .env("TEST_CAPTURE_FILE", &used)
+                .env("TEST_STAGED_FILE", &staged);
+            if enabled {
+                cmd.arg("--copy-containerfile");
+            }
+            let output = cmd.output().unwrap();
+            assert!(output.status.success(), "{:?}", output);
+            assert_eq!(
+                std::fs::read_to_string(host_copy).unwrap(),
+                "keep host file"
+            );
+            assert_eq!(staged.exists(), enabled);
+            if enabled {
+                assert_eq!(
+                    std::fs::read(&staged).unwrap(),
+                    std::fs::read(&used).unwrap()
+                );
+                assert!(std::fs::read_to_string(used).unwrap().contains(
+                    "COPY --chown=sandbox:sandbox build-containerfile ${HOME}/Containerfile"
+                ));
+            }
+        }
+    }
+}
+
+mod copy_containerfile {
+    use super::*;
+
+    static IMAGE: OnceLock<String> = OnceLock::new();
+
+    fn image() -> &'static str {
+        IMAGE.get_or_init(|| {
+            build_image(
+                "openshell-test-copy-containerfile:integration",
+                &["--copy-containerfile"],
+            )
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn containerfile_is_in_image_home() {
+        let output = run_in_image(image(), "cat \"$HOME/Containerfile\"");
+        assert!(output.status.success(), "{:?}", output);
+        let content = String::from_utf8_lossy(&output.stdout);
+        assert!(content.contains("FROM docker.io/library/ubuntu:24.04 AS system"));
+        assert!(
+            content
+                .contains("COPY --chown=sandbox:sandbox build-containerfile ${HOME}/Containerfile")
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn containerfile_is_owned_by_sandbox() {
+        let output = run_in_image(image(), "stat -c '%U:%G' \"$HOME/Containerfile\"");
+        assert!(output.status.success(), "{:?}", output);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "sandbox:sandbox"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn containerfile_is_absent_without_flag() {
+        let output = run_in_image(ubuntu_image(), "test ! -e \"$HOME/Containerfile\"");
+        assert!(output.status.success(), "{:?}", output);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Image build helpers
 // ---------------------------------------------------------------------------
@@ -2801,6 +2907,7 @@ mod ssl_certs {
 #[ctor::dtor]
 fn cleanup_images() {
     for tag in [
+        "openshell-test-copy-containerfile:integration",
         "openshell-test-ubuntu:integration",
         "openshell-test-ubuntu-claude:integration",
         "openshell-test-ubuntu-opencode:integration",
