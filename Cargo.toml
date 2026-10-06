@@ -17,9 +17,12 @@
 [workspace]
 members = [".", "crates/container-image-builder", "crates/vm-image-builder"]
 
+[workspace.package]
+version = "0.13.0-next"
+
 [package]
 name = "openshell-build-image"
-version = "0.13.0-next"
+version.workspace = true
 edition = "2024"
 
 [features]

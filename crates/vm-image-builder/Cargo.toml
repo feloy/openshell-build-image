@@ -16,7 +16,7 @@
 
 [package]
 name = "vm-image-builder"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Build container images inside a libkrun microVM and export them as a flattened rootfs tarball"
 license = "Apache-2.0"

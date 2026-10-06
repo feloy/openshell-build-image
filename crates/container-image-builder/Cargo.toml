@@ -16,7 +16,7 @@
 
 [package]
 name = "container-image-builder"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Build container images from an in-memory Containerfile using Podman, Docker, or the macOS container CLI"
 license = "Apache-2.0"
