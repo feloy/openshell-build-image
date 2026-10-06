@@ -47,6 +47,7 @@ pub fn generate(
     env_vars: &HashMap<String, String>,
     with_policy: bool,
     with_ca_certs: bool,
+    copy_containerfile: bool,
 ) -> Result<String, ContainerfileError> {
     let tag = &config.base_image.tag;
     let system_stage = match config.base_image.image.as_str() {
@@ -114,7 +115,8 @@ pub fn generate(
             with_agent_settings,
             skill_names,
             env_vars,
-            with_policy
+            with_policy,
+            copy_containerfile
         )
     ))
 }
@@ -267,7 +269,13 @@ fn final_stage(
     skill_names: &[String],
     env_vars: &HashMap<String, String>,
     with_policy: bool,
+    copy_containerfile: bool,
 ) -> String {
+    let containerfile_section = if copy_containerfile {
+        "COPY --chown=sandbox:sandbox build-containerfile ${HOME}/Containerfile\n\n"
+    } else {
+        ""
+    };
     let agent_section = agent
         .map(|a| format!("{}\n\n", a.install()))
         .unwrap_or_default();
@@ -308,7 +316,7 @@ FROM system AS final
 ENV HOME=/sandbox
 USER sandbox
 
-{env_vars_section}{agent_settings_section}{skills_section}{agent_section}ENTRYPOINT ["/bin/bash"]
+{env_vars_section}{agent_settings_section}{skills_section}{agent_section}{containerfile_section}ENTRYPOINT ["/bin/bash"]
 "#
     )
 }
@@ -336,11 +344,23 @@ mod tests {
             &HashMap::new(),
             with_policy,
             false,
+            false,
         )
     }
 
     fn build_cf_with_ca_certs(config: &Config) -> String {
-        generate(config, None, &[], false, &[], &HashMap::new(), false, true).unwrap()
+        generate(
+            config,
+            None,
+            &[],
+            false,
+            &[],
+            &HashMap::new(),
+            false,
+            true,
+            false,
+        )
+        .unwrap()
     }
 
     fn ubuntu_config(tag: &str) -> Config {
@@ -1014,6 +1034,7 @@ mod tests {
             &vars,
             false,
             false,
+            false,
         )
         .unwrap();
         assert!(content.contains("ENV ANTHROPIC_BASE_URL=\"https://proxy.example.com\""));
@@ -1033,6 +1054,7 @@ mod tests {
             false,
             &[],
             &vars,
+            false,
             false,
             false,
         )
@@ -1066,11 +1088,40 @@ mod tests {
             &vars,
             false,
             false,
+            false,
         )
         .unwrap();
         let a_pos = content.find("ENV A_VAR=").unwrap();
         let z_pos = content.find("ENV Z_VAR=").unwrap();
         assert!(a_pos < z_pos, "env vars must be sorted alphabetically");
+    }
+
+    #[test]
+    fn copy_containerfile_is_supported_on_all_base_images() {
+        for config in [
+            ubuntu_config("24.04"),
+            fedora_config(),
+            ubi_config(),
+            hummingbird_config(),
+        ] {
+            let content = generate(
+                &config,
+                None,
+                &[],
+                false,
+                &[],
+                &HashMap::new(),
+                false,
+                false,
+                true,
+            )
+            .unwrap();
+            assert!(content.contains(
+                "COPY --chown=sandbox:sandbox build-containerfile ${HOME}/Containerfile"
+            ));
+            let without_copy = build_cf(&config, None, &[], false, &[], false).unwrap();
+            assert!(!without_copy.contains("build-containerfile"));
+        }
     }
 
     // CA cert tests

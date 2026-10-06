@@ -221,17 +221,14 @@ jobs:
         run: make build-vm
 
       - name: Build an image in the VM
-        run: make run-vm TAG=openshell-vm-test:integration ARGS=-v
+        run: make run-vm TAG=openshell-vm-test:integration ARGS="-v --copy-containerfile"
 
       - name: Verify the exported rootfs
         run: |
           test -s ./target/openshell-vm-test-integration.tar
-          mkdir -p "$RUNNER_TEMP/vm-rootfs-check"
-          tar -xf ./target/openshell-vm-test-integration.tar -C "$RUNNER_TEMP/vm-rootfs-check" ./etc/passwd
-          # The generated Containerfile always creates the sandbox user the
-          # agent runs as, so its absence means the build produced the wrong
-          # filesystem rather than merely an empty one.
-          grep -q '^sandbox:' "$RUNNER_TEMP/vm-rootfs-check/etc/passwd"
+          tar -tf ./target/openshell-vm-test-integration.tar > "$RUNNER_TEMP/vm-rootfs-contents.txt"
+          # Match the filename without assuming where the image sets HOME.
+          grep -Eq '(^|/)Containerfile$' "$RUNNER_TEMP/vm-rootfs-contents.txt"
 
       # This runner is someone's own machine, and the exported rootfs is a few
       # hundred MB. Do not leave it lying around, even when the job fails.
@@ -242,5 +239,5 @@ jobs:
       - name: Clean up
         if: always()
         run: |
-          rm -rf ./vm-rootfs.tar ./target/openshell-vm-test-integration.tar "$RUNNER_TEMP/vm-rootfs-check"
+          rm -rf ./vm-rootfs.tar ./target/openshell-vm-test-integration.tar "$RUNNER_TEMP/vm-rootfs-contents.txt"
           rm -rf "$HOME/Library/Application Support/openshell-build-image/vm-rootfs"

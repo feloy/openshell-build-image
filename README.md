@@ -640,6 +640,15 @@ An invalid or unparseable host entry (e.g. a bare space or malformed URL) causes
 
 With this configuration, `cargo build` and `cargo fetch` inside the sandbox can download crate metadata and source tarballs.
 
+## Saving the Containerfile
+
+Pass `--copy-containerfile` to include the exact Containerfile used for the build at `$HOME/Containerfile` **inside the image** (`/sandbox/Containerfile`), owned by the `sandbox` user.
+
+```sh
+openshell-build-image --runtime podman --copy-containerfile myimage:latest
+podman run --rm myimage:latest -c 'cat "$HOME/Containerfile"'
+```
+
 ## Full option reference
 
 ```
@@ -656,6 +665,7 @@ openshell-build-image [OPTIONS] <TAG>
 | `--endpoint <URL>`             | Override the inference provider's default endpoint URL (see [Custom endpoint](#custom-endpoint---endpoint)) |
 | `--model <MODEL>`              | Default model for the agent to use (see [Default model](#default-model---model)) |
 | `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features, skills, and network rules |
+| `--copy-containerfile`         | Copy the build Containerfile to `$HOME/Containerfile` inside the image (`/sandbox/Containerfile`) |
 | `--with-policy`                | Include OpenShell sandbox policy (`/etc/openshell/policy.yaml`) in the image   |
 | `--with-agent-settings`        | Generate and include agent settings in the image (see [Agent settings](#agent-settings)) |
 | `--ssl-certs <FILE>`           | Use a specific CA bundle instead of the auto-discovered one (see [Corporate proxy support](#corporate-proxy-support---ssl-certs)). The build fails immediately if the file does not exist. |

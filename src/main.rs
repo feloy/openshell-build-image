@@ -131,6 +131,11 @@ struct Cli {
         help = "Read .kaiden/workspace.json and apply its features, skills, and network rules"
     )]
     with_workspace_config: bool,
+    #[arg(
+        long,
+        help = "Copy the build Containerfile to $HOME/Containerfile inside the image"
+    )]
+    copy_containerfile: bool,
     #[arg(long, help = "Include OpenShell sandbox policy in the image")]
     with_policy: bool,
     #[arg(long, help = "Generate and include agent settings in the image")]
@@ -232,6 +237,7 @@ fn main() {
         cli.with_policy,
         cli.with_agent_settings,
         ssl_certs,
+        cli.copy_containerfile,
         &backend,
     ) {
         eprintln!("Error: {e}");
@@ -413,6 +419,7 @@ fn run(
     with_policy: bool,
     with_agent_settings: bool,
     ssl_certs: Option<Option<PathBuf>>,
+    copy_containerfile: bool,
     backend: &Backend,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if endpoint.is_some() && inference_kind == Some(inference::InferenceKind::VertexAi) {
@@ -489,7 +496,11 @@ fn run(
         &agent_env_vars,
         with_policy,
         ca_certs_copied,
+        copy_containerfile,
     )?;
+    if copy_containerfile {
+        std::fs::write(context_dir.path().join("build-containerfile"), &output)?;
+    }
     match backend {
         Backend::Cli(cli, runner) => build(&output, tag, cli, *runner, context_dir.path())?,
         Backend::Vm(config, runner, vm_output) => {
@@ -770,6 +781,12 @@ mod tests {
             // `run` deletes the context directory as soon as it returns, so the
             // Containerfile has to be read here, while the VM would see it.
             let containerfile = std::fs::read_to_string(build.context.join("Containerfile"))?;
+            if containerfile.contains("COPY --chown=sandbox:sandbox build-containerfile") {
+                assert_eq!(
+                    std::fs::read_to_string(build.context.join("build-containerfile"))?,
+                    containerfile
+                );
+            }
             *self.0.lock().unwrap() = Some((build.clone(), containerfile));
             Ok(())
         }
@@ -1214,6 +1231,65 @@ mod tests {
         assert_eq!(names, vec!["skill-a", "skill-b"]);
     }
 
+    #[test]
+    fn copy_containerfile_flag_is_opt_in() {
+        let cli = Cli::try_parse_from(["test", "--runtime", "podman", "test:latest"]).unwrap();
+        assert!(!cli.copy_containerfile);
+        let cli = Cli::try_parse_from([
+            "test",
+            "--runtime",
+            "podman",
+            "--copy-containerfile",
+            "test:latest",
+        ])
+        .unwrap();
+        assert!(cli.copy_containerfile);
+    }
+
+    #[test]
+    fn run_stages_exact_build_containerfile_only_when_requested() {
+        struct CopyChecker(bool);
+
+        impl Runner for CopyChecker {
+            fn run(&self, cmd: &mut Command) -> std::io::Result<ExitStatus> {
+                let args: Vec<_> = cmd.get_args().collect();
+                let file_index = args.iter().position(|arg| *arg == "-f").unwrap() + 1;
+                let used = std::fs::read_to_string(args[file_index])?;
+                let context = Path::new(args.last().unwrap());
+                let staged = context.join("build-containerfile");
+                assert_eq!(staged.exists(), self.0);
+                if self.0 {
+                    assert_eq!(std::fs::read_to_string(staged)?, used);
+                    assert!(used.contains(
+                        "COPY --chown=sandbox:sandbox build-containerfile ${HOME}/Containerfile"
+                    ));
+                } else {
+                    assert!(!used.contains("build-containerfile"));
+                }
+                FakeRunner(0).run(cmd)
+            }
+        }
+
+        for enabled in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            run(
+                "test:latest",
+                Some(tmp.path().to_path_buf()),
+                false,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                enabled,
+                &Backend::Cli(&ContainerCli::Podman, &CopyChecker(enabled)),
+            )
+            .unwrap();
+        }
+    }
+
     // run
 
     #[test]
@@ -1230,6 +1306,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1249,6 +1326,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1268,6 +1346,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1287,6 +1366,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_err());
@@ -1312,6 +1392,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(1)),
         );
         assert!(result.is_err());
@@ -1331,6 +1412,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_err());
@@ -1356,6 +1438,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1517,6 +1600,7 @@ mod tests {
             true,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1536,6 +1620,7 @@ mod tests {
             false,
             true,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1555,6 +1640,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_err());
@@ -1722,6 +1808,7 @@ mod tests {
             false,
             false,
             Some(None),
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1743,6 +1830,7 @@ mod tests {
             false,
             false,
             Some(Some(cert)),
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -1762,6 +1850,7 @@ mod tests {
             false,
             false,
             Some(Some(PathBuf::from("/nonexistent/bundle.crt"))),
+            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_err());
@@ -1782,6 +1871,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
         )
         .unwrap();
@@ -1995,6 +2085,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Vm(&config, &runner, &output),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -2020,6 +2111,7 @@ mod tests {
             false,
             false,
             None,
+            true,
             &Backend::Vm(&config, &runner, &tmp.path().join("out.tar")),
         )
         .unwrap();
@@ -2027,6 +2119,7 @@ mod tests {
         // The VM reads the Containerfile through the context share, so it must
         // have been written into the context directory before the VM booted.
         let cf = runner.containerfile();
+        assert!(cf.contains("build-containerfile ${HOME}/Containerfile"));
         assert!(cf.contains("FROM"), "unexpected Containerfile: {cf}");
         assert!(cf.contains("claude"), "expected the agent install in: {cf}");
     }
@@ -2057,6 +2150,7 @@ mod tests {
             false,
             false,
             None,
+            false,
             &Backend::Vm(&config, &FailingVmRunner, &tmp.path().join("out.tar")),
         );
         assert!(result.is_err(), "expected Err, got {result:?}");
