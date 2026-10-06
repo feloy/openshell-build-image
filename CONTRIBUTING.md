@@ -1,4 +1,4 @@
-# Contributing to openshell-image-builder
+# Contributing to openshell-build-image
 
 ## Prerequisites
 
@@ -17,8 +17,8 @@ rustup toolchain install stable
 ## Getting started
 
 ```sh
-git clone https://github.com/openkaiden/openshell-image-builder.git
-cd openshell-image-builder
+git clone https://github.com/openkaiden/openshell-build-image.git
+cd openshell-build-image
 cargo build
 cargo run -- --help
 ```
@@ -156,7 +156,7 @@ Dependabot opens daily PRs to keep existing SHAs current — you only need to fe
 1. Fork the repository and create a branch from `main`.
 2. Make your changes. Run the check suite: `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
 3. Add the Apache 2.0 header to any new `.rs` files.
-4. Open a PR against `main` in `openkaiden/openshell-image-builder`.
+4. Open a PR against `main` in `openkaiden/openshell-build-image`.
 
 CI runs automatically on every PR:
 - **PR Check** (`pr-check.yml`) — fmt, clippy, unit tests on Ubuntu, macOS, and Windows; coverage upload to Codecov.

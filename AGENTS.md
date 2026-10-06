@@ -1,4 +1,4 @@
-# openshell-image-builder
+# openshell-build-image
 
 Rust CLI using clap (derive API) for argument parsing.
 

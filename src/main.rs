@@ -93,7 +93,7 @@ enum Selected {
 
 #[derive(Parser)]
 #[command(
-    name = "openshell-image-builder",
+    name = "openshell-build-image",
     version,
     about = "OpenShell image builder"
 )]
@@ -108,7 +108,7 @@ struct Cli {
     runtime: Runtime,
     #[arg(
         long,
-        env = "OPENSHELL_IMAGE_BUILDER_CONFIG",
+        env = "OPENSHELL_BUILD_IMAGE_CONFIG",
         help = "Path to config directory (must contain config.toml)"
     )]
     config: Option<PathBuf>,
@@ -436,7 +436,7 @@ fn run(
     }
     let inference = inference_kind.clone().map(inference::from_kind);
     let context_dir = tempfile::Builder::new()
-        .prefix("openshell-image-builder")
+        .prefix("openshell-build-image")
         .tempdir()?;
     let features = feature::stage_all(workspace.as_ref(), context_dir.path())?;
     let has_agent_settings = if with_agent_settings {
@@ -798,7 +798,7 @@ mod tests {
 
     /// Parses `args` as a full command line, with the binary name prepended.
     fn parse_cli(args: &[&str]) -> Result<Cli, clap::Error> {
-        let mut argv = vec!["openshell-image-builder"];
+        let mut argv = vec!["openshell-build-image"];
         argv.extend_from_slice(args);
         Cli::try_parse_from(argv)
     }

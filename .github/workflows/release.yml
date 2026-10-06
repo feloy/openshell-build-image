@@ -123,7 +123,7 @@ jobs:
         if: matrix.vm == true
         run: cargo build --release --target ${{ matrix.target }} --features vm
         env:
-          OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE: ${{ github.workspace }}/vm-rootfs.tar
+          OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE: ${{ github.workspace }}/vm-rootfs.tar
 
       - name: Build (cross)
         if: matrix.use_cross == true
@@ -159,7 +159,7 @@ jobs:
             --force \
             --sign "$IDENTITY" \
             --options runtime \
-            target/${{ matrix.target }}/release/openshell-image-builder
+            target/${{ matrix.target }}/release/openshell-build-image
 
       # macOS denies Hypervisor.framework to any process whose signature lacks
       # the entitlement, so the vm binary carries it. Read it back rather than
@@ -177,9 +177,9 @@ jobs:
             --sign "$IDENTITY" \
             --options runtime \
             --entitlements entitlements.plist \
-            target/${{ matrix.target }}/release/openshell-image-builder
+            target/${{ matrix.target }}/release/openshell-build-image
           codesign -d --entitlements :- \
-            target/${{ matrix.target }}/release/openshell-image-builder | \
+            target/${{ matrix.target }}/release/openshell-build-image | \
             grep -q "com.apple.security.hypervisor"
 
       - name: Notarize binary
@@ -189,9 +189,9 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          zip -j "$RUNNER_TEMP/openshell-image-builder.zip" \
-            target/${{ matrix.target }}/release/openshell-image-builder
-          xcrun notarytool submit "$RUNNER_TEMP/openshell-image-builder.zip" \
+          zip -j "$RUNNER_TEMP/openshell-build-image.zip" \
+            target/${{ matrix.target }}/release/openshell-build-image
+          xcrun notarytool submit "$RUNNER_TEMP/openshell-build-image.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -204,8 +204,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: openshell-image-builder-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/openshell-image-builder${{ contains(matrix.target, 'windows') && '.exe' || '' }}
+          name: openshell-build-image-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/openshell-build-image${{ contains(matrix.target, 'windows') && '.exe' || '' }}
 
   release:
     needs: build
@@ -225,10 +225,10 @@ jobs:
         run: |
           for dir in artifacts/*/; do
             platform=$(basename "$dir")
-            if [ -f "$dir/openshell-image-builder.exe" ]; then
-              mv "$dir/openshell-image-builder.exe" "$dir/$platform.exe"
-            elif [ -f "$dir/openshell-image-builder" ]; then
-              mv "$dir/openshell-image-builder" "$dir/$platform"
+            if [ -f "$dir/openshell-build-image.exe" ]; then
+              mv "$dir/openshell-build-image.exe" "$dir/$platform.exe"
+            elif [ -f "$dir/openshell-build-image" ]; then
+              mv "$dir/openshell-build-image" "$dir/$platform"
             fi
           done
 

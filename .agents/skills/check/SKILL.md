@@ -5,7 +5,7 @@ description: Run the pre-commit check suite — cargo fmt, clippy, and unit test
 
 # Check
 
-Run the mandatory pre-commit check suite for openshell-image-builder.
+Run the mandatory pre-commit check suite for openshell-build-image.
 
 ## Description
 

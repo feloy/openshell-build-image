@@ -21,7 +21,7 @@
 //! in the binary is what lets a downloaded build run without the user first
 //! producing one with Podman.
 //!
-//! Point `OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE` at the tarball the script
+//! Point `OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE` at the tarball the script
 //! writes and it is compressed into `OUT_DIR` alongside a digest of the
 //! compressed bytes, which the binary uses as its cache key. Without the
 //! variable the build still succeeds and writes empty placeholders, leaving
@@ -34,7 +34,7 @@ use std::{env, fs};
 use sha2::{Digest, Sha256};
 
 /// Env var naming the tarball to embed.
-const ARCHIVE_ENV: &str = "OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE";
+const ARCHIVE_ENV: &str = "OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE";
 
 /// Compressed rootfs written into `OUT_DIR`.
 const ARCHIVE_OUT: &str = "vm-rootfs.tar.zst";

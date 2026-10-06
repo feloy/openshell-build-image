@@ -1,19 +1,19 @@
 ---
 name: add-base-image
-description: Step-by-step checklist for adding a new base image to openshell-image-builder, covering the Containerfile match arm, unit tests, and integration tests
+description: Step-by-step checklist for adding a new base image to openshell-build-image, covering the Containerfile match arm, unit tests, and integration tests
 argument-hint: "<image-name> <registry-url> <package-manager>"
 ---
 
 # Add Base Image
 
-End-to-end checklist for supporting a new base image in openshell-image-builder.
+End-to-end checklist for supporting a new base image in openshell-build-image.
 
 ## Description
 
 The base image is selected by the user via `config.toml`:
 
 ```toml
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "myimage"
 tag   = "latest"
 ```
@@ -50,7 +50,7 @@ Three places reference the supported base image names; all must be kept in sync:
    **My Image**
 
    \`\`\`toml
-   [openshell_image_builder.base_image]
+   [openshell_build_image.base_image]
    image = "myimage"
    tag   = "latest"
    \`\`\`
@@ -169,7 +169,7 @@ fn myimage_config_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[openshell_image_builder.base_image]\nimage = \"myimage\"\ntag = \"latest\"\n",
+        "[openshell_build_image.base_image]\nimage = \"myimage\"\ntag = \"latest\"\n",
     )
     .unwrap();
     dir

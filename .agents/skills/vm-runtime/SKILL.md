@@ -36,10 +36,10 @@ export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
 cargo build --release --features vm
 
 codesign --sign - --entitlements entitlements.plist --force \
-  target/release/openshell-image-builder
+  target/release/openshell-build-image
 
 DYLD_LIBRARY_PATH="$(brew --prefix)/lib" \
-  ./target/release/openshell-image-builder --runtime vm -v myimage:latest
+  ./target/release/openshell-build-image --runtime vm -v myimage:latest
 ```
 
 `DYLD_LIBRARY_PATH` is needed at **run** time because libkrun loads its kernel, `libkrunfw`, by name and no rpath covers Homebrew's directory.
@@ -58,11 +58,11 @@ In order:
 
 1. `--vm-rootfs <DIR>` if passed — always wins.
 2. Otherwise the copy embedded in the binary, unpacked on first use to
-   `~/Library/Application Support/openshell-image-builder/vm-rootfs/<version>/`.
+   `~/Library/Application Support/openshell-build-image/vm-rootfs/<version>/`.
 
 Later runs reuse the unpacked copy. It is re-unpacked when the version changes, when the embedded archive changes, or when the unpacked tree is damaged. Deleting that directory is always safe.
 
-A binary built **without** `OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE` embeds nothing, so a plain `cargo build --features vm` has no rootfs to fall back on and needs `--vm-rootfs`.
+A binary built **without** `OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE` embeds nothing, so a plain `cargo build --features vm` has no rootfs to fall back on and needs `--vm-rootfs`.
 
 ### Know how the guest resolves names
 
@@ -88,13 +88,13 @@ Edit `crates/vm-image-builder/vm-image/Containerfile` (what the VM contains) or 
 Test against it directly:
 
 ```bash
-./target/release/openshell-image-builder --runtime vm --vm-rootfs ./vm-rootfs myimage:latest
+./target/release/openshell-build-image --runtime vm --vm-rootfs ./vm-rootfs myimage:latest
 ```
 
 Embed it, which is what a release build does:
 
 ```bash
-OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE=$PWD/vm-rootfs.tar \
+OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE=$PWD/vm-rootfs.tar \
   cargo build --release --features vm
 ```
 
@@ -115,7 +115,7 @@ cargo clippy --workspace --features vm -- -D warnings && cargo test --workspace 
 |---|---|---|
 | `VM builds are not available: this binary was built without the 'vm' feature` | Built without `--features vm` | Rebuild with `--features vm` |
 | `VM builds are not available: libkrun requires macOS on Apple Silicon` | Wrong platform | Nothing to fix — the backend cannot run there |
-| `no VM rootfs is embedded in this build` | Built without `OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE` | Pass `--vm-rootfs`, or rebuild with the variable set |
+| `no VM rootfs is embedded in this build` | Built without `OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE` | Pass `--vm-rootfs`, or rebuild with the variable set |
 | `VM rootfs '<path>': not a directory` / `missing /usr/local/bin/vm-build` | `--vm-rootfs` points somewhere that is not a build rootfs | Point it at a directory made by `make-rootfs.sh` |
 | `Couldn't find or load libkrunfw.5.dylib` | libkrun cannot find its kernel at run time | Set `DYLD_LIBRARY_PATH="$(brew --prefix)/lib"` |
 | `libkrun call krun_start_enter failed` with no other output | Signature lacks the hypervisor entitlement, or the host is not bare metal | Re-run `codesign` with `entitlements.plist`; check `sysctl -n kern.hv_support` is `1` |
@@ -145,6 +145,6 @@ cargo clippy --workspace --features vm -- -D warnings && cargo test --workspace 
 - [ ] Edited `Containerfile` or `vm-build`.
 - [ ] Rebuilt with `make-rootfs.sh ./vm-rootfs ./vm-rootfs.tar` on `linux/arm64`.
 - [ ] Ran a build with `--vm-rootfs ./vm-rootfs` and checked the output tarball.
-- [ ] Rebuilt with `OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE` set, re-signed, and ran once without `--vm-rootfs`.
+- [ ] Rebuilt with `OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE` set, re-signed, and ran once without `--vm-rootfs`.
 - [ ] Ran both check suites (with and without `--features vm`).
 - [ ] Updated the README if a requirement or flag changed.

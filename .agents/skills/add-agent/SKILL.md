@@ -1,6 +1,6 @@
 ---
 name: add-agent
-description: Step-by-step checklist for adding a new agent to openshell-image-builder, covering the Agent trait, mod.rs registration, unit tests, integration tests, and README
+description: Step-by-step checklist for adding a new agent to openshell-build-image, covering the Agent trait, mod.rs registration, unit tests, integration tests, and README
 argument-hint: "<agent-name>"
 ---
 

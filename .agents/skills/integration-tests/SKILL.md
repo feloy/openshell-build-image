@@ -6,7 +6,7 @@ argument-hint: "[test filter]"
 
 # Integration Tests
 
-Run the integration test suite for openshell-image-builder.
+Run the integration test suite for openshell-build-image.
 
 ## Description
 
@@ -44,7 +44,7 @@ If the user passes an argument to this skill, use it as the filter.
 ### Prerequisites
 
 - `podman` must be installed and functional.
-- The `openshell-image-builder` binary must be up to date — run `cargo build` first if `src/` changed.
+- The `openshell-build-image` binary must be up to date — run `cargo build` first if `src/` changed.
 
 ## How tests are written
 

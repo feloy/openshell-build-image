@@ -25,7 +25,7 @@ fn fedora_config_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[openshell_image_builder.base_image]\nimage = \"fedora\"\ntag = \"latest\"\n",
+        "[openshell_build_image.base_image]\nimage = \"fedora\"\ntag = \"latest\"\n",
     )
     .unwrap();
     dir
@@ -35,7 +35,7 @@ fn ubi_config_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[openshell_image_builder.base_image]\nimage = \"ubi\"\ntag = \"latest\"\n",
+        "[openshell_build_image.base_image]\nimage = \"ubi\"\ntag = \"latest\"\n",
     )
     .unwrap();
     dir
@@ -45,14 +45,14 @@ fn hummingbird_config_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.toml"),
-        "[openshell_image_builder.base_image]\nimage = \"hummingbird\"\ntag = \"latest-builder\"\n",
+        "[openshell_build_image.base_image]\nimage = \"hummingbird\"\ntag = \"latest-builder\"\n",
     )
     .unwrap();
     dir
 }
 
 fn build_image(tag: &str, extra_args: &[&str]) -> String {
-    let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+    let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .args(["--runtime", "podman"])
         .args(extra_args)
@@ -854,7 +854,7 @@ fn workspace_dir(workspace_json: &str) -> tempfile::TempDir {
 
 fn build_image_with_workspace(tag: &str, workspace_json: &str, extra_args: &[&str]) -> String {
     let dir = workspace_dir(workspace_json);
-    let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+    let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
         .args(["--runtime", "podman"])
@@ -1041,7 +1041,7 @@ fn local_feature_workspace_dir() -> tempfile::TempDir {
 
 fn build_image_with_local_feature(tag: &str, extra_args: &[&str]) -> String {
     let dir = local_feature_workspace_dir();
-    let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+    let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
         .args(["--runtime", "podman"])
@@ -1101,7 +1101,7 @@ fn skills_workspace_dir() -> tempfile::TempDir {
 
 fn build_image_with_skills(tag: &str, extra_args: &[&str]) -> String {
     let dir = skills_workspace_dir();
-    let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+    let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
         .args(["--runtime", "podman"])
@@ -1140,7 +1140,7 @@ fn ubuntu_opencode_skills_image() -> &'static str {
 /// workspace file is present on disk but deliberately ignored by the tool.
 fn build_image_in_workspace_dir(tag: &str, workspace_json: &str, extra_args: &[&str]) -> String {
     let dir = workspace_dir(workspace_json);
-    let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+    let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
         .args(["--runtime", "podman"])
@@ -1165,7 +1165,7 @@ fn no_workspace_config_oci_feature_ubuntu_image() -> &'static str {
 fn no_workspace_config_local_feature_ubuntu_image() -> &'static str {
     NO_WORKSPACE_CONFIG_LOCAL_FEATURE_UBUNTU_IMAGE.get_or_init(|| {
         let dir = local_feature_workspace_dir();
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .current_dir(dir.path())
             .args(["--runtime", "podman"])
@@ -1180,7 +1180,7 @@ fn no_workspace_config_local_feature_ubuntu_image() -> &'static str {
 fn no_workspace_config_claude_skills_ubuntu_image() -> &'static str {
     NO_WORKSPACE_CONFIG_CLAUDE_SKILLS_UBUNTU_IMAGE.get_or_init(|| {
         let dir = skills_workspace_dir();
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .current_dir(dir.path())
             .args(["--runtime", "podman"])
@@ -1196,7 +1196,7 @@ fn no_workspace_config_claude_skills_ubuntu_image() -> &'static str {
 fn no_workspace_config_opencode_skills_ubuntu_image() -> &'static str {
     NO_WORKSPACE_CONFIG_OPENCODE_SKILLS_UBUNTU_IMAGE.get_or_init(|| {
         let dir = skills_workspace_dir();
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .current_dir(dir.path())
             .args(["--runtime", "podman"])
@@ -2027,7 +2027,7 @@ mod opencode_ollama {
     #[test]
     #[ignore]
     fn claude_with_ollama_inference_is_rejected() {
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .args([
                 "--runtime",
@@ -2070,7 +2070,7 @@ mod opencode_openai {
     #[test]
     #[ignore]
     fn claude_with_openai_inference_is_rejected() {
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .args([
                 "--runtime",
@@ -2611,7 +2611,7 @@ mod endpoint_rejection {
 
     #[test]
     fn vertexai_with_endpoint_exits_nonzero() {
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let output = Command::new(binary)
             .args([
                 "--runtime",
@@ -2633,7 +2633,7 @@ mod endpoint_rejection {
     #[test]
     #[ignore]
     fn vertexai_with_endpoint_error_mentions_vertexai() {
-        let binary = env!("CARGO_BIN_EXE_openshell-image-builder");
+        let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let output = Command::new(binary)
             .args([
                 "--runtime",
