@@ -1,8 +1,8 @@
-# openshell-image-builder
+# openshell-build-image
 
 [OpenShell](https://github.com/NVIDIA/OpenShell-Community) is NVIDIA's runtime environment for autonomous AI agents. It provides isolated sandboxes where agents can safely run and iterate — without risk to the host system or your credentials.
 
-OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-image-builder` lets you build your own: lightweight, workspace-specific images that contain only what you need — without writing a Containerfile by hand.
+OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-build-image` lets you build your own: lightweight, workspace-specific images that contain only what you need — without writing a Containerfile by hand.
 
 The tool assembles the image in layers — base image, agent installation, agent settings, OpenShell network policy, and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
@@ -61,7 +61,7 @@ The tool assembles the image in layers — base image, agent installation, agent
 Build an image with a single command:
 
 ```sh
-openshell-image-builder --runtime podman myimage:latest
+openshell-build-image --runtime podman myimage:latest
 ```
 
 `<TAG>` and `--runtime` are the only required arguments — `--runtime` selects the build backend (`podman`, `docker`, `container`, or `vm`), and `<TAG>` sets the tag for the built image. By default, the tool uses Ubuntu 24.04 as the base image.
@@ -77,7 +77,7 @@ The VM runs its own kernel in its own process namespace and sees only three dire
 This is the one way `--runtime vm` differs from the others in its result. A container CLI leaves a tagged image in its local image store. The VM has no access to that store, so it writes a **flattened rootfs tarball** instead:
 
 ```sh
-openshell-image-builder --runtime vm myimage:latest
+openshell-build-image --runtime vm myimage:latest
 # -> ./myimage-latest.tar
 ```
 
@@ -108,7 +108,7 @@ tar -xf myimage-latest.tar -C /path/to/rootfs
 
    The feature is off by default because it links against libkrun, and macOS refuses the hypervisor to an unsigned binary. `make build-vm` does both, and re-signs on every build, since compiling clears the signature.
 
-The VM's own root filesystem — a Linux tree with `buildah` in it — comes inside the binary and unpacks itself on first use, into `~/Library/Application Support/openshell-image-builder/vm-rootfs`.
+The VM's own root filesystem — a Linux tree with `buildah` in it — comes inside the binary and unpacks itself on first use, into `~/Library/Application Support/openshell-build-image/vm-rootfs`.
 
 ### Building the VM's root filesystem
 
@@ -127,7 +127,7 @@ Or point at the directory without embedding anything: `--vm-rootfs ./vm-rootfs`.
 `buildah` uses the `vfs` storage driver inside the VM — virtio-fs does not support overlayfs — which stores a full copy of every layer rather than a diff. Builds therefore need more memory than the same build under overlayfs. If one fails with an out-of-memory message, raise it:
 
 ```sh
-openshell-image-builder \
+openshell-build-image \
   --runtime vm \
   --vm-cpus 4 \
   --vm-memory 8192 \
@@ -143,7 +143,7 @@ So the build reads the host's own nameservers on each run and hands them to the 
 Override it when the host's resolvers are not the ones the build should use:
 
 ```sh
-openshell-image-builder --runtime vm --vm-dns 10.0.0.53 --vm-dns 10.0.0.54 myimage:latest
+openshell-build-image --runtime vm --vm-dns 10.0.0.53 --vm-dns 10.0.0.54 myimage:latest
 ```
 
 A loopback address is rejected: inside the VM, loopback is the VM. If the host resolves through one — systemd-resolved, a VPN client's local stub — pass the address it forwards to instead. When the host has no usable nameserver at all, the VM falls back to `1.1.1.1`.
@@ -157,11 +157,11 @@ To use a different base image or tag, create a configuration file.
 The tool looks for a `config.toml` file in this order, using the first directory found:
 
 1. Directory given by the `--config` flag
-2. Directory set in the `OPENSHELL_IMAGE_BUILDER_CONFIG` environment variable
+2. Directory set in the `OPENSHELL_BUILD_IMAGE_CONFIG` environment variable
 3. The platform config directory:
-   - Linux: `$XDG_CONFIG_HOME/openshell-image-builder/` (defaults to `~/.config/openshell-image-builder/`)
-   - macOS: `~/Library/Application Support/openshell-image-builder/`
-   - Windows: `%APPDATA%\openshell-image-builder\`
+   - Linux: `$XDG_CONFIG_HOME/openshell-build-image/` (defaults to `~/.config/openshell-build-image/`)
+   - macOS: `~/Library/Application Support/openshell-build-image/`
+   - Windows: `%APPDATA%\openshell-build-image\`
 
 If no `config.toml` is found in the resolved directory, or the file is empty, built-in defaults are used.
 
@@ -172,7 +172,7 @@ If a directory is given explicitly (via `--config` or the environment variable) 
 **Ubuntu** (default)
 
 ```toml
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "ubuntu"
 tag   = "24.04"
 ```
@@ -180,7 +180,7 @@ tag   = "24.04"
 **Fedora**
 
 ```toml
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "fedora"
 tag   = "latest"
 ```
@@ -188,7 +188,7 @@ tag   = "latest"
 **Red Hat UBI**
 
 ```toml
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "ubi"
 tag   = "latest"
 ```
@@ -196,7 +196,7 @@ tag   = "latest"
 **Red Hat Hardened Images (Hummingbird)**
 
 ```toml
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "hummingbird"
 tag   = "latest-builder"
 ```
@@ -204,32 +204,32 @@ tag   = "latest-builder"
 ### Full schema reference
 
 ```toml
-[openshell_image_builder]
+[openshell_build_image]
 version = 1
 
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "ubuntu"   # "ubuntu", "fedora", "ubi", or "hummingbird"
 tag   = "24.04"
 ```
 
 | Field                                      | Default  | Description                  |
 | ------------------------------------------ | -------- | ---------------------------- |
-| `openshell_image_builder.version`          | `1`      | Configuration schema version |
-| `openshell_image_builder.base_image.image` | `ubuntu` | Base image name (`ubuntu`, `fedora`, `ubi`, or `hummingbird`) |
-| `openshell_image_builder.base_image.tag`   | `24.04`  | Base image tag — Ubuntu: `24.04`, `22.04`, …; Fedora: `latest`, `43`, `42`, …; UBI: `latest`, `10.2-1780377767`, …; Hummingbird: `latest-builder`, … |
+| `openshell_build_image.version`          | `1`      | Configuration schema version |
+| `openshell_build_image.base_image.image` | `ubuntu` | Base image name (`ubuntu`, `fedora`, `ubi`, or `hummingbird`) |
+| `openshell_build_image.base_image.tag`   | `24.04`  | Base image tag — Ubuntu: `24.04`, `22.04`, …; Fedora: `latest`, `43`, `42`, …; UBI: `latest`, `10.2-1780377767`, …; Hummingbird: `latest-builder`, … |
 
 ### Loading from a specific config directory
 
 Pass `--config` to point to a directory explicitly (the tool reads `config.toml` inside it):
 
 ```sh
-openshell-image-builder --runtime podman --config /path/to/config/dir myimage:latest
+openshell-build-image --runtime podman --config /path/to/config/dir myimage:latest
 ```
 
 Or set the environment variable instead:
 
 ```sh
-OPENSHELL_IMAGE_BUILDER_CONFIG=/path/to/config/dir openshell-image-builder myimage:latest
+OPENSHELL_BUILD_IMAGE_CONFIG=/path/to/config/dir openshell-build-image myimage:latest
 ```
 
 ## Logging
@@ -237,7 +237,7 @@ OPENSHELL_IMAGE_BUILDER_CONFIG=/path/to/config/dir openshell-image-builder myima
 Use `-v` (info) or `-vv` (debug) to increase log verbosity — useful for tracing which config file is loaded:
 
 ```sh
-openshell-image-builder --runtime podman -v myimage:latest
+openshell-build-image --runtime podman -v myimage:latest
 ```
 
 ## Enterprise environments
@@ -265,13 +265,13 @@ If none of the above paths exist, the build proceeds without adding any certific
 **Explicit file** — point directly to a specific CA bundle with `--ssl-certs`. The build fails immediately if the file does not exist:
 
 ```sh
-openshell-image-builder --ssl-certs /etc/pki/tls/certs/ca-bundle.crt myimage:latest
+openshell-build-image --ssl-certs /etc/pki/tls/certs/ca-bundle.crt myimage:latest
 ```
 
 **Disable** — pass `--disable-ssl-certs` to skip certificate bundling entirely:
 
 ```sh
-openshell-image-builder --disable-ssl-certs myimage:latest
+openshell-build-image --disable-ssl-certs myimage:latest
 ```
 
 #### How it works
@@ -287,13 +287,13 @@ Because the `final` image stage inherits the full filesystem from `system`, the 
 
 ```sh
 # Auto-discover the host CA bundle and build with Claude Code (default behaviour)
-openshell-image-builder \
+openshell-build-image \
   --agent claude \
   --inference anthropic \
   myimage:latest
 
 # Point to a specific bundle instead
-openshell-image-builder \
+openshell-build-image \
   --ssl-certs /usr/local/share/ca-certificates/my-corp-ca.crt \
   --agent claude \
   --inference anthropic \
@@ -310,8 +310,8 @@ Pass `--agent` to install an agent into the image.
 | OpenCode    | `opencode` | OpenCode AI coding agent       |
 
 ```sh
-openshell-image-builder --runtime podman --agent claude myimage:latest
-openshell-image-builder --runtime podman --agent opencode myimage:latest
+openshell-build-image --runtime podman --agent claude myimage:latest
+openshell-build-image --runtime podman --agent opencode myimage:latest
 ```
 
 ## Agent settings
@@ -331,11 +331,11 @@ All files and subdirectories are copied into `/sandbox/` (the sandbox user's hom
 ### Example — Claude Code settings file
 
 ```sh
-mkdir -p ~/.config/openshell-image-builder/agents/claude/.claude
+mkdir -p ~/.config/openshell-build-image/agents/claude/.claude
 cp ~/.claude/settings.json \
-   ~/.config/openshell-image-builder/agents/claude/.claude/settings.json
+   ~/.config/openshell-build-image/agents/claude/.claude/settings.json
 
-openshell-image-builder --runtime podman --agent claude --with-agent-settings myimage:latest
+openshell-build-image --runtime podman --agent claude --with-agent-settings myimage:latest
 ```
 
 The file will be present at `/sandbox/.claude/settings.json` in the image.
@@ -343,11 +343,11 @@ The file will be present at `/sandbox/.claude/settings.json` in the image.
 ### Example — OpenCode settings file
 
 ```sh
-mkdir -p ~/.config/openshell-image-builder/agents/opencode/.config/opencode
+mkdir -p ~/.config/openshell-build-image/agents/opencode/.config/opencode
 cp ~/.config/opencode/config.json \
-   ~/.config/openshell-image-builder/agents/opencode/.config/opencode/config.json
+   ~/.config/openshell-build-image/agents/opencode/.config/opencode/config.json
 
-openshell-image-builder --runtime podman --agent opencode --with-agent-settings myimage:latest
+openshell-build-image --runtime podman --agent opencode --with-agent-settings myimage:latest
 ```
 
 The file will be present at `/sandbox/.config/opencode/config.json` in the image.
@@ -373,12 +373,12 @@ Pass `--inference` to allow the agent to reach its LLM backend. This is separate
 | OpenAI    | `openai`    | `opencode`              | OpenAI API (`api.openai.com`), or any OpenAI-compatible endpoint via `--endpoint` |
 
 ```sh
-openshell-image-builder --runtime podman --agent claude --inference anthropic myimage:latest
-openshell-image-builder --runtime podman --agent opencode --inference anthropic myimage:latest
-openshell-image-builder --runtime podman --agent claude --inference vertexai myimage:latest
-openshell-image-builder --runtime podman --agent opencode --inference vertexai myimage:latest
-openshell-image-builder --runtime podman --agent opencode --inference ollama myimage:latest
-openshell-image-builder --runtime podman --agent opencode --inference openai myimage:latest
+openshell-build-image --runtime podman --agent claude --inference anthropic myimage:latest
+openshell-build-image --runtime podman --agent opencode --inference anthropic myimage:latest
+openshell-build-image --runtime podman --agent claude --inference vertexai myimage:latest
+openshell-build-image --runtime podman --agent opencode --inference vertexai myimage:latest
+openshell-build-image --runtime podman --agent opencode --inference ollama myimage:latest
+openshell-build-image --runtime podman --agent opencode --inference openai myimage:latest
 ```
 
 ### Custom endpoint (`--endpoint`)
@@ -396,21 +396,21 @@ Use `--endpoint` to override the inference provider's default URL — useful for
 
 ```sh
 # Route Claude Code through a custom Anthropic API proxy
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent claude --inference anthropic \
   --endpoint https://my-anthropic-proxy.example.com \
   myimage:latest
 
 # Route OpenCode through a custom Anthropic API proxy
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent opencode --inference anthropic \
   --endpoint https://my-anthropic-proxy.example.com \
   myimage:latest
 
 # Connect OpenCode to Ollama running on a non-default port
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent opencode --inference ollama \
   --endpoint http://localhost:9999/v1 \
@@ -431,21 +431,21 @@ Use `--model` to bake a default model into the image. The agent uses this model 
 
 ```sh
 # Pin Claude Code to a specific model
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent claude --inference anthropic \
   --model claude-opus-4-8 \
   myimage:latest
 
 # Pin OpenCode to a specific Anthropic model
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent opencode --inference anthropic \
   --model claude-opus-4-8 \
   myimage:latest
 
 # Pin OpenCode to a specific Ollama model
-openshell-image-builder \
+openshell-build-image \
   --runtime podman \
   --agent opencode --inference ollama \
   --model qwen3-coder:30b \
@@ -488,7 +488,7 @@ Pass `--with-policy` to include `/etc/openshell/policy.yaml` in the image. Witho
 - **Network policies** — which binaries are allowed to connect to which hosts and ports.
 
 ```sh
-openshell-image-builder --runtime podman --agent claude --inference anthropic --with-policy myimage:latest
+openshell-build-image --runtime podman --agent claude --inference anthropic --with-policy myimage:latest
 ```
 
 The policy is built in four layers, merged in order:
@@ -577,7 +577,7 @@ Skills without a corresponding `--agent` flag are silently ignored — the agent
 
 When `--with-workspace-config` is passed, the tool reads `.kaiden/workspace.json` and:
 
-1. Downloads and extracts each OCI feature into a temporary build context directory (`/tmp/openshell-image-builder…`).
+1. Downloads and extracts each OCI feature into a temporary build context directory (`/tmp/openshell-build-image…`).
 2. Copies local feature directories into the same build context.
 3. Passes the build context to `podman build`, where each feature is installed via:
    ```dockerfile
@@ -643,14 +643,14 @@ With this configuration, `cargo build` and `cargo fetch` inside the sandbox can 
 ## Full option reference
 
 ```
-openshell-image-builder [OPTIONS] <TAG>
+openshell-build-image [OPTIONS] <TAG>
 ```
 
 | Argument / Option              | Description                                                        |
 | ------------------------------ | ------------------------------------------------------------------ |
 | `<TAG>`                        | Tag for the built image (e.g. `myimage:latest`)                    |
 | `--runtime <RUNTIME>`          | Backend to build the image with (`podman`, `docker`, `container`, `vm` — see [Building in a VM](#building-in-a-vm---runtime-vm)) |
-| `--config <CONFIG>`            | Path to config directory containing `config.toml` (env: `OPENSHELL_IMAGE_BUILDER_CONFIG`) |
+| `--config <CONFIG>`            | Path to config directory containing `config.toml` (env: `OPENSHELL_BUILD_IMAGE_CONFIG`) |
 | `--agent <AGENT>`              | Agent to install in the image (`claude`, `opencode`)               |
 | `--inference <INFERENCE>`      | Inference server the agent will connect to (`anthropic`, `vertexai`, `ollama`, `openai`) |
 | `--endpoint <URL>`             | Override the inference provider's default endpoint URL (see [Custom endpoint](#custom-endpoint---endpoint)) |
@@ -674,7 +674,7 @@ The five `--vm-*` options are rejected with any other `--runtime`, rather than s
 ### Claude Code agent + Anthropic models provider
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent claude \
   --inference anthropic \
@@ -709,7 +709,7 @@ $ openshell sandbox create \
 ### OpenCode agent + Anthropic models provider
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent opencode \
   --inference anthropic \
@@ -744,7 +744,7 @@ $ openshell sandbox create \
 ### Claude Code agent + Vertex AI models provider
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent claude \
   --inference vertexai \
@@ -789,7 +789,7 @@ $ openshell sandbox create \
 Ollama must be running on the host before starting the sandbox.
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent opencode \
   --inference ollama \
@@ -817,7 +817,7 @@ $ openshell sandbox create \
 ### OpenCode agent + OpenAI models provider
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent opencode \
   --inference openai \
@@ -852,7 +852,7 @@ $ openshell sandbox create \
 To use an OpenAI-compatible endpoint (e.g. Azure OpenAI, a local proxy, or another provider's API):
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent opencode \
   --inference openai \
@@ -865,7 +865,7 @@ $ openshell-image-builder \
 ### OpenCode agent + Vertex AI models provider
 
 ```sh
-$ openshell-image-builder \
+$ openshell-build-image \
   --runtime podman \
   --agent opencode \
   --inference vertexai \

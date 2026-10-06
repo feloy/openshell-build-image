@@ -23,7 +23,7 @@
 # The -vm half compiles the libkrun FFI code, which the default feature set
 # leaves out, and works only on an Apple Silicon Mac.
 
-BINARY := target/release/openshell-image-builder
+BINARY := target/release/openshell-build-image
 VM_ROOTFS_DIR := vm-rootfs
 VM_ROOTFS_ARCHIVE := $(CURDIR)/vm-rootfs.tar
 BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
@@ -43,7 +43,7 @@ VM_ENV := LIBCLANG_PATH="$(LIBCLANG_PATH)" \
 # Embed the rootfs when one has been built. Without it the binary still
 # compiles, and then needs --vm-rootfs at run time.
 ifneq ($(wildcard $(VM_ROOTFS_ARCHIVE)),)
-VM_ARCHIVE_ENV := OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE=$(VM_ROOTFS_ARCHIVE)
+VM_ARCHIVE_ENV := OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE=$(VM_ROOTFS_ARCHIVE)
 endif
 
 .PHONY: help
@@ -130,4 +130,4 @@ clean:
 .PHONY: clean-vm
 clean-vm: clean
 	rm -rf $(VM_ROOTFS_DIR) $(VM_ROOTFS_ARCHIVE)
-	rm -rf "$(HOME)/Library/Application Support/openshell-image-builder/vm-rootfs"
+	rm -rf "$(HOME)/Library/Application Support/openshell-build-image/vm-rootfs"

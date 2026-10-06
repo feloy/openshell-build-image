@@ -22,7 +22,7 @@
 # Usage: ./make-rootfs.sh [OUTPUT_DIR] [ARCHIVE]
 #   OUTPUT_DIR  where to write the rootfs  (default: ./vm-rootfs)
 #   ARCHIVE     also pack the rootfs into this tarball, which the build script
-#               embeds when OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE points at
+#               embeds when OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE points at
 #               it. Left uncompressed: build.rs compresses what it embeds, and
 #               zstd is not part of a stock macOS.
 set -e
@@ -85,9 +85,9 @@ if [ -n "$ARCHIVE_OUT" ]; then
     echo "Archive ready at: $ARCHIVE_OUT"
     echo ""
     echo "Embed it in the binary:"
-    echo "  OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE=$ARCHIVE_OUT \\"
+    echo "  OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE=$ARCHIVE_OUT \\"
     echo "    cargo build --release --features vm"
 fi
 echo ""
 echo "Build an image with it:"
-echo "  openshell-image-builder --runtime vm --vm-rootfs $ROOTFS myimage:latest"
+echo "  openshell-build-image --runtime vm --vm-rootfs $ROOTFS myimage:latest"

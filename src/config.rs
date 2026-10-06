@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct ConfigFile {
-    openshell_image_builder: Config,
+    openshell_build_image: Config,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -80,7 +80,7 @@ fn find_settings_dir(explicit_dir: Option<&Path>) -> Result<Option<PathBuf>, std
         }
         return Ok(Some(dir.to_path_buf()));
     }
-    Ok(dirs::config_dir().map(|d| d.join("openshell-image-builder")))
+    Ok(dirs::config_dir().map(|d| d.join("openshell-build-image")))
 }
 
 fn find_config_file(explicit_dir: Option<PathBuf>) -> Result<Option<PathBuf>, std::io::Error> {
@@ -130,7 +130,7 @@ pub fn load(explicit_path: Option<PathBuf>) -> Result<Config, Box<dyn std::error
 
     let file: ConfigFile = toml::from_str(&content)?;
     info!("Config loaded from {}", path.display());
-    Ok(file.openshell_image_builder)
+    Ok(file.openshell_build_image)
 }
 
 #[cfg(test)]
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn load_fails_when_explicit_dir_not_found() {
-        let path = std::env::temp_dir().join("openshell-image-builder-nonexistent-dir");
+        let path = std::env::temp_dir().join("openshell-build-image-nonexistent-dir");
         assert!(!path.exists());
         assert!(load(Some(path)).is_err());
     }
@@ -178,10 +178,10 @@ mod tests {
     fn load_parses_valid_toml() {
         let dir = write_config_dir(
             r#"
-[openshell_image_builder]
+[openshell_build_image]
 version = 2
 
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "ubuntu"
 tag = "24.04"
 "#,
@@ -206,7 +206,7 @@ tag = "24.04"
 
     #[test]
     fn load_parses_toml_with_only_version() {
-        let dir = write_config_dir("[openshell_image_builder]\nversion = 2");
+        let dir = write_config_dir("[openshell_build_image]\nversion = 2");
         let config = load(Some(dir.path().to_path_buf())).unwrap();
         assert_eq!(config.version, 2);
         assert_eq!(config.base_image, BaseImageConfig::default());
@@ -215,7 +215,7 @@ tag = "24.04"
     #[test]
     fn load_parses_toml_with_only_base_image() {
         let dir = write_config_dir(
-            "[openshell_image_builder.base_image]\nimage = \"ubuntu\"\ntag = \"24.04\"",
+            "[openshell_build_image.base_image]\nimage = \"ubuntu\"\ntag = \"24.04\"",
         );
         let config = load(Some(dir.path().to_path_buf())).unwrap();
         assert_eq!(config.version, 1);
@@ -225,7 +225,7 @@ tag = "24.04"
 
     #[test]
     fn load_parses_toml_with_only_image_in_base_image() {
-        let dir = write_config_dir("[openshell_image_builder.base_image]\nimage = \"centos\"");
+        let dir = write_config_dir("[openshell_build_image.base_image]\nimage = \"centos\"");
         let config = load(Some(dir.path().to_path_buf())).unwrap();
         assert_eq!(config.version, 1);
         assert_eq!(config.base_image.image, "centos");
@@ -234,7 +234,7 @@ tag = "24.04"
 
     #[test]
     fn load_parses_toml_with_only_tag_in_base_image() {
-        let dir = write_config_dir("[openshell_image_builder.base_image]\ntag = \"40\"");
+        let dir = write_config_dir("[openshell_build_image.base_image]\ntag = \"40\"");
         let config = load(Some(dir.path().to_path_buf())).unwrap();
         assert_eq!(config.version, 1);
         assert_eq!(config.base_image.image, "ubuntu");
@@ -266,7 +266,7 @@ tag = "24.04"
 
     #[test]
     fn agent_settings_dir_fails_when_explicit_dir_not_found() {
-        let path = std::env::temp_dir().join("openshell-image-builder-nonexistent-dir");
+        let path = std::env::temp_dir().join("openshell-build-image-nonexistent-dir");
         assert!(!path.exists());
         assert!(agent_settings_dir(Some(&path), "claude").is_err());
     }

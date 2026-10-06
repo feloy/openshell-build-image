@@ -1,6 +1,6 @@
 # Skills
 
-Project-specific skills for openshell-image-builder.
+Project-specific skills for openshell-build-image.
 
 ## Available skills
 

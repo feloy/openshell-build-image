@@ -1,12 +1,12 @@
 ---
 name: add-cli-flag
-description: Step-by-step checklist for adding a new CLI flag to openshell-image-builder, covering all locations from the clap struct to integration tests
+description: Step-by-step checklist for adding a new CLI flag to openshell-build-image, covering all locations from the clap struct to integration tests
 argument-hint: "<flag-name> <description>"
 ---
 
 # Add CLI Flag
 
-End-to-end checklist for introducing a new CLI argument to openshell-image-builder.
+End-to-end checklist for introducing a new CLI argument to openshell-build-image.
 
 ## Description
 

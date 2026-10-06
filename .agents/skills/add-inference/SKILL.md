@@ -1,6 +1,6 @@
 ---
 name: add-inference
-description: Step-by-step checklist for adding a new inference provider to openshell-image-builder, covering the trait implementation, agent wiring, unit tests, integration tests, and README
+description: Step-by-step checklist for adding a new inference provider to openshell-build-image, covering the trait implementation, agent wiring, unit tests, integration tests, and README
 argument-hint: "<provider-name>"
 ---
 

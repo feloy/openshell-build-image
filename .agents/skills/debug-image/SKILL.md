@@ -102,7 +102,7 @@ For images that use a non-default base image (fedora, ubi, hummingbird), create 
 ```sh
 mkdir /tmp/fedora-config
 cat > /tmp/fedora-config/config.toml <<'EOF'
-[openshell_image_builder.base_image]
+[openshell_build_image.base_image]
 image = "fedora"
 tag   = "42"
 EOF

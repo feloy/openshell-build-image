@@ -22,7 +22,7 @@
 //! producing that filesystem takes Podman on a `linux/arm64` machine. Asking
 //! the user for it would put back exactly the requirement this runtime removes,
 //! so the binary carries one instead: `build.rs` compresses the tarball named
-//! by `OPENSHELL_IMAGE_BUILDER_VM_ROOTFS_ARCHIVE` into the executable, and the
+//! by `OPENSHELL_BUILD_IMAGE_VM_ROOTFS_ARCHIVE` into the executable, and the
 //! first VM build unpacks it into the user's data directory.
 //!
 //! A build made without that variable embeds nothing and says so when asked
@@ -88,11 +88,11 @@ pub fn ensure_extracted() -> Result<PathBuf, String> {
     install(ARCHIVE, DIGEST, &cache_root()?)
 }
 
-/// `<data dir>/openshell-image-builder/vm-rootfs`, the parent of every
+/// `<data dir>/openshell-build-image/vm-rootfs`, the parent of every
 /// extracted version.
 fn cache_root() -> Result<PathBuf, String> {
     dirs::data_dir()
-        .map(|dir| dir.join("openshell-image-builder").join("vm-rootfs"))
+        .map(|dir| dir.join("openshell-build-image").join("vm-rootfs"))
         .ok_or_else(|| "cannot locate a data directory to unpack the VM rootfs into".to_string())
 }
 
