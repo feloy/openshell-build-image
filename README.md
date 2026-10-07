@@ -4,23 +4,13 @@
 
 OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-build-image` lets you build your own: lightweight, workspace-specific images that contain only what you need — without writing a Containerfile by hand.
 
-The tool assembles the image in layers — base image, agent installation, agent settings, OpenShell network policy, and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
+The tool assembles the image from a base image, an optional OpenShell network policy, and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
-1. **Base image** — Ubuntu, Fedora, Red Hat UBI, or Red Hat Hardened Images (HummingBird), any tag. Ubuntu 24.04 is the default.
-2. **Agent installation** (`--agent`) — the agent binary is pre-installed in `PATH`.
-3. **Agent settings** (`--with-agent-settings`) — only included when this flag is set.
-   - **User settings** — settings files are pre-populated with settings files provided by the user.
-   - **Auto-onboarding** — settings files are updated to skip onboarding steps (choose theme, trust directory, etc).
-   - **Skills** — skills are copied in the agent's skills directory.
-   - **Inference settings** (`--inference`) — inference provider definition is added to settings files.
-   - **Endpoint override** (`--endpoint`) — optional custom URL for inference provider is set in inference provider definition.
-   - **Model** (`--model`) — default model is baked into the agent's settings files.
-4. **OpenShell policy** (`--with-policy`) — `/etc/openshell/policy.yaml` copied into the image only when `--with-policy` is passed.
-   - **Base policy** — Git operations over HTTPS and the GitHub REST API.
-   - **Agent network rules** — agent-specific endpoints are added by `--agent`.
-   - **Inference network rules** — LLM backend endpoints are added by `--inference`.
-   - **Workspace network rules** — user-defined hosts declared in `.kaiden/workspace.json` are added to the policy when `--with-workspace-config` is used.
-5. **Installation of project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed in the image when `--with-workspace-config` is used.
+1. **Base image** — chosen via a config file, defaults to Ubuntu 24.04.
+2. **OpenShell sandbox policy** (`--with-policy`) — includes base tooling rules and workspace hosts from `.kaiden/workspace.json` when `--with-workspace-config` is used.
+3. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
+
+Built-in agent installation and configuration have been removed. OCI addon support is tracked in [#178](https://github.com/openkaiden/openshell-build-image/issues/178).
 
 ### workspace.json fields
 
@@ -29,7 +19,7 @@ The tool assembles the image in layers — base image, agent installation, agent
 | Field | Description | Details |
 | ----- | ----------- | ------- |
 | `features` | Dev Container Features to install in the image | [Dev Container Features](#dev-container-features) |
-| `skills` | Skill directories to copy into the agent's skills directory | [Skills](#skills) |
+| ~~`skills`~~ | ~~Skill directories~~ | ~~not used by the image builder~~ |
 | `network.hosts` | Hostnames (and optional ports) to allow through the sandbox network policy | [Workspace network rules](#workspace-network-rules) |
 | ~~`network.mode`~~ | ~~`allow` or `deny` — OpenShell always enforces deny mode; allow-all is not supported~~ | ~~not used by the image builder~~ |
 | ~~`environment`~~ | ~~Environment variables to inject into the workspace~~ | ~~not used by the image builder~~ |
@@ -37,24 +27,6 @@ The tool assembles the image in layers — base image, agent installation, agent
 | ~~`mounts`~~ | ~~Host directories to mount in the workspace~~ | ~~not used by the image builder~~ |
 | ~~`ports`~~ | ~~TCP ports to expose from the workspace~~ | ~~not used by the image builder~~ |
 | ~~`secrets`~~ | ~~Secret names to inject into the workspace~~ | ~~not used by the image builder~~ |
-
-### Agent Supported Features
-
-| Agent      | User settings | Auto-onboarding | Skills |
-| ---------- | ------------- | --------------- | ------ |
-| `claude`   | Yes           | Yes             | Yes<br>`/sandbox/.claude/skills/`   |
-| `opencode` | Yes           | N/A             | Yes<br>`/sandbox/.opencode/skills/` |
-
-### Agent × Inference Supported Features
-
-| Agent      | Inference   | Inference settings             | Endpoint override                          | Model selection                                  |
-| ---------- | ----------- | ------------------------------ | ------------------------------------------ | ------------------------------------------------ |
-| `claude`   | `anthropic` | N/A                            | Yes<br>`ENV ANTHROPIC_BASE_URL`            | Yes<br>`model` in `.claude/settings.json`        |
-| `claude`   | `vertexai`  | N/A                            | No<br>fixed endpoint                       | Yes<br>`model` in `.claude/settings.json`        |
-| `opencode` | `anthropic` | N/A, Yes if endpoint override  | Yes<br>opencode config `baseURL`           | Yes<br>`model` in `.config/opencode/config.json` |
-| `opencode` | `vertexai`  | N/A                            | No<br>fixed endpoint                       | Yes<br>`model` in `.config/opencode/config.json` |
-| `opencode` | `ollama`    | Yes<br>Ollama provider config  | Yes<br>`baseURL` in Ollama provider config | Yes<br>`model` in `.config/opencode/config.json` |
-| `opencode` | `openai`    | Yes if model or endpoint       | Yes<br>`baseURL` in custom provider config | Yes<br>`model` in `.config/opencode/config.json` |
 
 ## Quick start
 
@@ -242,186 +214,6 @@ openshell-build-image --runtime podman -v myimage:latest
 
 OpenShell manages CA certificates for the sandbox. The image builder does not discover or copy the host's CA bundle into images.
 
-## Installing an agent
-
-Pass `--agent` to install an agent into the image.
-
-| Agent       | Value      | Description                    |
-| ----------- | ---------- | ------------------------------ |
-| Claude Code | `claude`   | Anthropic's Claude Code CLI    |
-| OpenCode    | `opencode` | OpenCode AI coding agent       |
-
-```sh
-openshell-build-image --runtime podman --agent claude myimage:latest
-openshell-build-image --runtime podman --agent opencode myimage:latest
-```
-
-## Agent settings
-
-Pass `--with-agent-settings` to generate and include agent settings in the image. Without this flag, no settings files are written and no auto-configuration is applied — the image contains only the agent binary.
-
-You can pre-populate `/sandbox/` with settings files specific to an agent. Place the files under:
-
-```
-<settings dir>/agents/<agent>/
-```
-
-where `<settings dir>` is the directory described in [Configuring the base image](#configuring-the-base-image), and `<agent>` matches the value passed to `--agent` (`claude` or `opencode`).
-
-All files and subdirectories are copied into `/sandbox/`. The copy happens before the agent is installed, so the agent installer can create additional files on top without overwriting your settings.
-
-### Example — Claude Code settings file
-
-```sh
-mkdir -p ~/.config/openshell-build-image/agents/claude/.claude
-cp ~/.claude/settings.json \
-   ~/.config/openshell-build-image/agents/claude/.claude/settings.json
-
-openshell-build-image --runtime podman --agent claude --with-agent-settings myimage:latest
-```
-
-The file will be present at `/sandbox/.claude/settings.json` in the image.
-
-### Example — OpenCode settings file
-
-```sh
-mkdir -p ~/.config/openshell-build-image/agents/opencode/.config/opencode
-cp ~/.config/opencode/config.json \
-   ~/.config/openshell-build-image/agents/opencode/.config/opencode/config.json
-
-openshell-build-image --runtime podman --agent opencode --with-agent-settings myimage:latest
-```
-
-The file will be present at `/sandbox/.config/opencode/config.json` in the image.
-
-### Automatic configuration — Claude Code
-
-When `--agent claude --with-agent-settings` is used, the builder automatically creates or updates `/sandbox/.claude.json` with the following settings to skip the interactive onboarding dialogs that would otherwise appear on first launch:
-
-- `hasCompletedOnboarding: true` — marks the setup wizard as complete.
-- `projects["/sandbox"].hasTrustDialogAccepted: true` — pre-accepts the workspace trust prompt for the `/sandbox` project directory.
-
-If you provide your own `.claude.json` in the agent settings directory, the builder merges these fields into it, preserving any other fields you have set.
-
-## Configuring inference
-
-Pass `--inference` to allow the agent to reach its LLM backend. This is separate from `--agent` because the same inference provider can serve multiple agents.
-
-| Inference | Value       | Agents                  | Description                         |
-| --------- | ----------- | ----------------------- | ----------------------------------- |
-| Anthropic | `anthropic` | `claude`, `opencode`    | Anthropic API (`api.anthropic.com`) |
-| Vertex AI | `vertexai`  | `claude`, `opencode`    | Google Vertex AI (`oauth2.googleapis.com`, `aiplatform.googleapis.com`, `*-aiplatform.googleapis.com`) |
-| Ollama    | `ollama`    | `opencode`              | Local models on the host machine, reached via `host.openshell.internal:11434` |
-| OpenAI    | `openai`    | `opencode`              | OpenAI API (`api.openai.com`), or any OpenAI-compatible endpoint via `--endpoint` |
-
-```sh
-openshell-build-image --runtime podman --agent claude --inference anthropic myimage:latest
-openshell-build-image --runtime podman --agent opencode --inference anthropic myimage:latest
-openshell-build-image --runtime podman --agent claude --inference vertexai myimage:latest
-openshell-build-image --runtime podman --agent opencode --inference vertexai myimage:latest
-openshell-build-image --runtime podman --agent opencode --inference ollama myimage:latest
-openshell-build-image --runtime podman --agent opencode --inference openai myimage:latest
-```
-
-### Custom endpoint (`--endpoint`)
-
-Use `--endpoint` to override the inference provider's default URL — useful for routing through a proxy, a local instance, or a non-default port.
-
-| Agent      | Inference   | Supported | Effect |
-| ---------- | ----------- | --------- | ------ |
-| `claude`   | `anthropic` | ✅        | Baked into the image as `ENV ANTHROPIC_BASE_URL=<url>` |
-| `claude`   | `vertexai`  | ❌        | Rejected — Vertex AI has a proprietary fixed endpoint |
-| `opencode` | `anthropic` | ✅        | Written to opencode config as `provider.anthropic.options.baseURL` |
-| `opencode` | `vertexai`  | ❌        | Rejected — Vertex AI has a proprietary fixed endpoint |
-| `opencode` | `ollama`    | ✅        | Written to opencode config as `provider.ollama.options.baseURL`; `localhost` in the URL is rewritten to `host.openshell.internal`; defaults to `http://host.openshell.internal:11434/v1` if omitted |
-| `opencode` | `openai`    | ✅        | When provided, opencode is configured to use a custom `@ai-sdk/openai-compatible` provider with `options.baseURL` set to the given URL |
-
-```sh
-# Route Claude Code through a custom Anthropic API proxy
-openshell-build-image \
-  --runtime podman \
-  --agent claude --inference anthropic \
-  --endpoint https://my-anthropic-proxy.example.com \
-  myimage:latest
-
-# Route OpenCode through a custom Anthropic API proxy
-openshell-build-image \
-  --runtime podman \
-  --agent opencode --inference anthropic \
-  --endpoint https://my-anthropic-proxy.example.com \
-  myimage:latest
-
-# Connect OpenCode to Ollama running on a non-default port
-openshell-build-image \
-  --runtime podman \
-  --agent opencode --inference ollama \
-  --endpoint http://localhost:9999/v1 \
-  myimage:latest
-```
-
-### Default model (`--model`)
-
-Use `--model` to bake a default model into the image. The agent uses this model without requiring a runtime flag.
-
-| Agent      | Inference   | Effect |
-| ---------- | ----------- | ------ |
-| `claude`   | any         | Written to `.claude/settings.json` as `"model": "<model>"` |
-| `opencode` | `anthropic` | Written to opencode config as top-level `"model"` field (can be combined with `--endpoint`) |
-| `opencode` | `vertexai`  | Written to opencode config as top-level `"model"` field |
-| `opencode` | `ollama`    | Written to opencode config as top-level `"model": "ollama/<model>"` field; only the specified model is registered in the models map |
-| `opencode` | `openai`    | Written to opencode config as `"model": "openai/<model>"` (native OpenAI) or `"model": "custom/<model>"` (with `--endpoint`) |
-
-```sh
-# Pin Claude Code to a specific model
-openshell-build-image \
-  --runtime podman \
-  --agent claude --inference anthropic \
-  --model claude-opus-4-8 \
-  myimage:latest
-
-# Pin OpenCode to a specific Anthropic model
-openshell-build-image \
-  --runtime podman \
-  --agent opencode --inference anthropic \
-  --model claude-opus-4-8 \
-  myimage:latest
-
-# Pin OpenCode to a specific Ollama model
-openshell-build-image \
-  --runtime podman \
-  --agent opencode --inference ollama \
-  --model qwen3-coder:30b \
-  myimage:latest
-```
-
-The model string is passed through as-is — use whatever identifier your agent and provider expect.
-
-### Automatic configuration — OpenCode + Ollama
-
-When `--agent opencode --inference ollama --with-agent-settings` is used, the builder automatically writes `/sandbox/.config/opencode/config.json` to configure OpenCode's Ollama provider:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "http://host.openshell.internal:11434/v1"
-      },
-      "models": {
-        "lfm2.5":          { "tools": true },
-        "qwen3-coder:30b": { "tools": true }
-      }
-    }
-  }
-}
-```
-
-When `--model` is also given, the top-level `"model"` field is added (as `"ollama/<model>"`) and the `models` map is replaced with a single entry for the specified model.
-
-`host.openshell.internal` is the hostname used inside the sandbox to reach the container host, where Ollama is expected to be running on its default port (`11434`). Ollama must be running on the host before the sandbox is started.
-
 ## Sandbox policy
 
 Pass `--with-policy` to include `/etc/openshell/policy.yaml` in the image. Without this flag, no policy file is written and the image contains no OpenShell policy. The policy file is read by the OpenShell runtime and defines the sandbox security policy for the container:
@@ -430,15 +222,13 @@ Pass `--with-policy` to include `/etc/openshell/policy.yaml` in the image. Witho
 - **Network policies** — which binaries are allowed to connect to which hosts and ports.
 
 ```sh
-openshell-build-image --runtime podman --agent claude --inference anthropic --with-policy myimage:latest
+openshell-build-image --runtime podman --with-policy myimage:latest
 ```
 
-The policy is built in four layers, merged in order:
+The policy merges two layers:
 
 1. **Base** ([`assets/policy.yaml`](assets/policy.yaml)) — general-purpose tooling: Git operations over HTTPS and the GitHub REST API via `gh`.
-2. **Inference** (added by `--inference`) — LLM backend endpoints scoped to the agent binary. For example, `--inference anthropic` adds `api.anthropic.com` and `statsig.anthropic.com`; `--inference vertexai` adds `oauth2.googleapis.com` and `aiplatform.googleapis.com` (including the `*-aiplatform.googleapis.com` wildcard); `--inference ollama` adds `host.openshell.internal:11434` for local model access; `--inference openai` adds `api.openai.com` (or the custom endpoint host when `--endpoint` is used).
-3. **Agent** (added by `--agent`) — agent-specific endpoints. For example, `--agent claude` adds `platform.claude.com`, `raw.githubusercontent.com`, and the GitHub REST API for Claude's coding tools; `--agent opencode` adds `opencode.ai`, `registry.npmjs.org`, and `models.dev`.
-4. **Workspace** (added from `network.hosts` in `.kaiden/workspace.json` when `--with-workspace-config` is used) — user-defined hosts that any binary in standard PATH directories (`/bin`, `/usr/bin`, `/usr/local/bin`, `/sandbox/.local/bin`) and the agent binary (when present) may reach. See [Workspace network rules](#workspace-network-rules).
+2. **Workspace** (from `network.hosts` in `.kaiden/workspace.json` when `--with-workspace-config` is used) — user-defined hosts that binaries in `/bin`, `/usr/bin`, `/usr/local/bin`, and `/sandbox/.local/bin` may reach. See [Workspace network rules](#workspace-network-rules).
 
 ## Dev Container Features
 
@@ -489,32 +279,6 @@ With the above, `./my-feature` refers to a local feature at `.kaiden/my-feature/
 
 Features are installed in the order defined by each feature's `installsAfter` field in its `devcontainer-feature.json`. Within the same dependency level, features are processed in alphabetical order by reference.
 
-## Skills
-
-Agents can be extended with *skills* — named toolkits that an agent discovers at startup. Declare skill directories in `.kaiden/workspace.json` and pass `--with-workspace-config` to include them in the build:
-
-```json
-{
-  "skills": [
-    "./my-skill",
-    "./.kaiden/skills/another-skill"
-  ]
-}
-```
-
-Each entry is a path to a directory (relative to the workspace root). The directory name becomes the skill name in the image.
-
-During the build, each skill directory is copied into the agent's skills directory:
-
-| Agent      | Skills directory               |
-| ---------- | ------------------------------ |
-| `claude`   | `/sandbox/.claude/skills/`     |
-| `opencode` | `/sandbox/.opencode/skills/`   |
-
-With `--agent claude` and `"skills": ["./my-skill"]`, the skill lands at `/sandbox/.claude/skills/my-skill/` in the image.
-
-Skills without a corresponding `--agent` flag are silently ignored — the agent determines where skills go, so a build without an agent produces no skill COPY instructions.
-
 ### How it works
 
 When `--with-workspace-config` is passed, the tool reads `.kaiden/workspace.json` and:
@@ -559,7 +323,6 @@ The builder merges a single `workspace` network policy rule into `policy.yaml` t
 | `/usr/bin/**` | Standard system binaries (e.g. `curl`) |
 | `/usr/local/bin/**` | Locally installed tools |
 | `/sandbox/.local/bin/**` | User-local binaries |
-| agent binary | The agent binary (e.g. `/sandbox/.local/bin/claude`) when `--agent` is used |
 
 An invalid or unparseable host entry (e.g. a bare space or malformed URL) causes the build to fail immediately with a descriptive error message.
 
@@ -602,14 +365,9 @@ openshell-build-image [OPTIONS] <TAG>
 | `<TAG>`                        | Tag for the built image (e.g. `myimage:latest`)                    |
 | `--runtime <RUNTIME>`          | Backend to build the image with (`podman`, `docker`, `container`, `vm` — see [Building in a VM](#building-in-a-vm---runtime-vm)) |
 | `--config <CONFIG>`            | Path to config directory containing `config.toml` (env: `OPENSHELL_BUILD_IMAGE_CONFIG`) |
-| `--agent <AGENT>`              | Agent to install in the image (`claude`, `opencode`)               |
-| `--inference <INFERENCE>`      | Inference server the agent will connect to (`anthropic`, `vertexai`, `ollama`, `openai`) |
-| `--endpoint <URL>`             | Override the inference provider's default endpoint URL (see [Custom endpoint](#custom-endpoint---endpoint)) |
-| `--model <MODEL>`              | Default model for the agent to use (see [Default model](#default-model---model)) |
-| `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features, skills, and network rules |
+| `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features and network rules |
 | `--copy-containerfile`         | Copy the build Containerfile to `$HOME/Containerfile` inside the image |
 | `--with-policy`                | Include OpenShell sandbox policy (`/etc/openshell/policy.yaml`) in the image   |
-| `--with-agent-settings`        | Generate and include agent settings in the image (see [Agent settings](#agent-settings)) |
 | `--vm-rootfs <DIR>`            | Root filesystem the build VM boots from (`--runtime vm` only). Defaults to the one embedded in the binary. |
 | `--vm-output <FILE>`           | Path for the rootfs tarball produced by `--runtime vm`. Defaults to a name derived from `<TAG>` in the current directory. |
 | `--vm-cpus <N>`                | vCPUs given to the build VM (`--runtime vm` only). Default `2`.     |
@@ -619,238 +377,13 @@ openshell-build-image [OPTIONS] <TAG>
 
 The five `--vm-*` options are rejected with any other `--runtime`, rather than silently ignored.
 
-## Examples
+## Example — project toolchains and network access
 
-### Claude Code agent + Anthropic models provider
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent claude \
-  --inference anthropic \
-  --model claude-sonnet-4-6 \
-  --with-agent-settings \
-  sandbox_image:claude_anthropic
-
-$ openshell provider create \
-  --type generic \
-  --credential ANTHROPIC_API_KEY=sk-ant-... \
-  --name claude_anthropic_provider
-
-$ openshell sandbox create \
-  --from sandbox_image:claude_anthropic \
-  --provider claude_anthropic_provider \
-  --upload . \
-  --name claude_anthropic_sandbox \
-  --no-auto-providers \
-  -- claude
-
-# Or, with podman driver, you can mount the files
-# (https://docs.nvidia.com/openshell/reference/sandbox-compute-drivers#podman-driver-config-mounts)
-$ openshell sandbox create \
-  --from sandbox_image:claude_anthropic \
-  --provider claude_anthropic_provider \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name claude_anthropic_sandbox \
-  --no-auto-providers \
-  -- claude
-```
-
-### OpenCode agent + Anthropic models provider
+With Dev Container Features and `network.hosts` declared in `.kaiden/workspace.json`, build the image and include its policy:
 
 ```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent opencode \
-  --inference anthropic \
-  --model claude-sonnet-4-6 \
-  --with-agent-settings \
-  sandbox_image:opencode_anthropic
-
-$ openshell provider create \
-  --type generic \
-  --credential ANTHROPIC_API_KEY=sk-ant-... \
-  --name opencode_anthropic_provider
-
-$ openshell sandbox create \
-  --from sandbox_image:opencode_anthropic \
-  --provider opencode_anthropic_provider \
-  --upload . \
-  --name opencode_anthropic_sandbox \
-  --no-auto-providers \
-  -- opencode
-
-# Or, with podman driver, you can mount the files
-# (https://docs.nvidia.com/openshell/reference/sandbox-compute-drivers#podman-driver-config-mounts)
-$ openshell sandbox create \
-  --from sandbox_image:opencode_anthropic \
-  --provider opencode_anthropic_provider \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name opencode_anthropic_sandbox \
-  --no-auto-providers \
-  -- opencode
-```
-
-### Claude Code agent + Vertex AI models provider
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent claude \
-  --inference vertexai \
-  --model claude-sonnet-4-6 \
-  --with-agent-settings \
-  sandbox_image:claude_vertexai
-
-$ openshell settings set \
-  --global \
-  --key providers_v2_enabled \
-  --value true \
-  --yes
-
-# change value of VERTEX_AI_PROJECT_ID and VERTEX_AI_REGION
-$ openshell provider create \
-  --name vertex-local \
-  --type google-vertex-ai \
-  --from-gcloud-adc \
-  --config VERTEX_AI_PROJECT_ID=my-gcp-project \
-  --config VERTEX_AI_REGION=global
-
-# change with your preferred model
-$ openshell inference set \
-  --provider vertex-local \
-  --model claude-sonnet-4-6
-
-# Change source paths for mounts
-$ openshell sandbox create \
-  --from sandbox_image:claude_vertexai \
-  --provider vertex-local \
-  --env ANTHROPIC_BASE_URL="https://inference.local" \
-  --env ANTHROPIC_API_KEY=unused \
-  --env CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name claude_vertexai_sandbox \
-  --no-auto-providers \
-  -- bash -c 'cd /sandbox/work && claude --bare'
-```
-
-### OpenCode agent + Ollama (local models)
-
-Ollama must be running on the host before starting the sandbox.
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent opencode \
-  --inference ollama \
-  --model qwen3-coder:30b \
-  --with-agent-settings \
-  sandbox_image:opencode_ollama
-
-$ openshell sandbox create \
-  --from sandbox_image:opencode_ollama \
-  --upload . \
-  --name opencode_ollama_sandbox \
-  --no-auto-providers \
-  -- opencode
-
-# Or, with podman driver, you can mount the files
-# (https://docs.nvidia.com/openshell/reference/sandbox-compute-drivers#podman-driver-config-mounts)
-$ openshell sandbox create \
-  --from sandbox_image:opencode_ollama \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name opencode_ollama_sandbox \
-  --no-auto-providers \
-  -- opencode
-```
-
-### OpenCode agent + OpenAI models provider
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent opencode \
-  --inference openai \
-  --model gpt-4o \
-  --with-agent-settings \
-  sandbox_image:opencode_openai
-
-$ openshell provider create \
-  --type generic \
-  --credential OPENAI_API_KEY=sk-... \
-  --name opencode_openai_provider
-
-$ openshell sandbox create \
-  --from sandbox_image:opencode_openai \
-  --provider opencode_openai_provider \
-  --upload . \
-  --name opencode_openai_sandbox \
-  --no-auto-providers \
-  -- opencode
-
-# Or, with podman driver, you can mount the files
-# (https://docs.nvidia.com/openshell/reference/sandbox-compute-drivers#podman-driver-config-mounts)
-$ openshell sandbox create \
-  --from sandbox_image:opencode_openai \
-  --provider opencode_openai_provider \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name opencode_openai_sandbox \
-  --no-auto-providers \
-  -- opencode
-```
-
-To use an OpenAI-compatible endpoint (e.g. Azure OpenAI, a local proxy, or another provider's API):
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent opencode \
-  --inference openai \
-  --endpoint https://my-openai-proxy.example.com/v1 \
-  --model gpt-4o \
-  --with-agent-settings \
-  sandbox_image:opencode_openai_custom
-```
-
-### OpenCode agent + Vertex AI models provider
-
-```sh
-$ openshell-build-image \
-  --runtime podman \
-  --agent opencode \
-  --inference vertexai \
-  --model claude-sonnet-4-6 \
-  --with-agent-settings \
-  sandbox_image:opencode_vertexai
-
-$ openshell settings set \
-  --global \
-  --key providers_v2_enabled \
-  --value true \
-  --yes
-
-# change value of VERTEX_AI_PROJECT_ID and VERTEX_AI_REGION
-$ openshell provider create \
-  --name vertex-local \
-  --type google-vertex-ai \
-  --from-gcloud-adc \
-  --config VERTEX_AI_PROJECT_ID=my-gcp-project \
-  --config VERTEX_AI_REGION=global
-
-# change with your preferred model
-$ openshell inference set \
-  --provider vertex-local \
-  --model claude-sonnet-4-6
-
-# Change source paths for mounts
-$ openshell sandbox create \
-  --from sandbox_image:opencode_vertexai \
-  --provider vertex-local \
-  --env ANTHROPIC_BASE_URL="https://inference.local/v1" \
-  --env ANTHROPIC_API_KEY=unused \
-  --env CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
-  --driver-config-json '{"podman":{"mounts":[{"type":"bind","source":"/path/to/your/sources","target":"/sandbox/work","read_only":false}]}}' \
-  --name opencode_vertexai_sandbox \
-  --no-auto-providers \
-  -- bash -c 'cd /sandbox/work && opencode'
+openshell-build-image --runtime podman \
+  --with-workspace-config \
+  --with-policy \
+  myproject:latest
 ```

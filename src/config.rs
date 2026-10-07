@@ -98,21 +98,6 @@ fn find_config_file(explicit_dir: Option<PathBuf>) -> Result<Option<PathBuf>, st
     }
 }
 
-pub fn agent_settings_dir(
-    explicit_dir: Option<&Path>,
-    agent_name: &str,
-) -> Result<Option<PathBuf>, std::io::Error> {
-    let Some(settings_dir) = find_settings_dir(explicit_dir)? else {
-        return Ok(None);
-    };
-    let dir = settings_dir.join("agents").join(agent_name);
-    if dir.is_dir() {
-        Ok(Some(dir))
-    } else {
-        Ok(None)
-    }
-}
-
 pub fn load(explicit_path: Option<PathBuf>) -> Result<Config, Box<dyn std::error::Error>> {
     let Some(path) = find_config_file(explicit_path)? else {
         info!("No config file found, using built-in defaults");
@@ -246,34 +231,5 @@ tag = "24.04"
         // Exercises the XDG config-directory lookup; result is environment-dependent
         // but must always be Ok (either defaults or a valid XDG config).
         assert!(load(None).is_ok());
-    }
-
-    #[test]
-    fn agent_settings_dir_returns_none_when_subdir_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = agent_settings_dir(Some(dir.path()), "claude").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn agent_settings_dir_returns_path_when_subdir_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let agent_dir = dir.path().join("agents").join("claude");
-        std::fs::create_dir_all(&agent_dir).unwrap();
-        let result = agent_settings_dir(Some(dir.path()), "claude").unwrap();
-        assert_eq!(result, Some(agent_dir));
-    }
-
-    #[test]
-    fn agent_settings_dir_fails_when_explicit_dir_not_found() {
-        let path = std::env::temp_dir().join("openshell-build-image-nonexistent-dir");
-        assert!(!path.exists());
-        assert!(agent_settings_dir(Some(&path), "claude").is_err());
-    }
-
-    #[test]
-    fn agent_settings_dir_with_no_explicit_path_returns_ok() {
-        // XDG lookup — result is environment-dependent but must always be Ok.
-        assert!(agent_settings_dir(None, "claude").is_ok());
     }
 }
