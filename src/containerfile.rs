@@ -37,7 +37,6 @@ impl std::error::Error for ContainerfileError {}
 pub fn generate(
     config: &Config,
     features: &[StagedFeature],
-    with_policy: bool,
     copy_containerfile: bool,
 ) -> Result<String, ContainerfileError> {
     let tag = &config.base_image.tag;
@@ -97,7 +96,7 @@ pub fn generate(
     };
     Ok(format!(
         "{system_stage}\n{}",
-        final_stage(features, with_policy, copy_containerfile)
+        final_stage(features, copy_containerfile)
     ))
 }
 
@@ -206,7 +205,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     )
 }
 
-fn final_stage(features: &[StagedFeature], with_policy: bool, copy_containerfile: bool) -> String {
+fn final_stage(features: &[StagedFeature], copy_containerfile: bool) -> String {
     let containerfile_section = if copy_containerfile {
         "COPY build-containerfile /tmp/build-containerfile\n\
          RUN cp /tmp/build-containerfile \"$HOME/Containerfile\" && rm /tmp/build-containerfile\n\n"
@@ -214,16 +213,11 @@ fn final_stage(features: &[StagedFeature], with_policy: bool, copy_containerfile
         ""
     };
     let features_section = features_section(features);
-    let policy_section = if with_policy {
-        "COPY policy.yaml /etc/openshell/policy.yaml\n\n"
-    } else {
-        ""
-    };
     format!(
         r#"# Final base image
 FROM system AS final
 
-{features_section}{policy_section}{containerfile_section}
+{features_section}{containerfile_section}
 "#
     )
 }
@@ -233,12 +227,8 @@ mod tests {
     use super::*;
     use crate::config::{BaseImageConfig, Config};
 
-    fn build_cf(
-        config: &Config,
-        features: &[StagedFeature],
-        with_policy: bool,
-    ) -> Result<String, ContainerfileError> {
-        generate(config, features, with_policy, false)
+    fn build_cf(config: &Config, features: &[StagedFeature]) -> Result<String, ContainerfileError> {
+        generate(config, features, false)
     }
 
     fn ubuntu_config(tag: &str) -> Config {
@@ -293,20 +283,20 @@ mod tests {
     #[test]
     fn ubuntu_generates_successfully() {
         let config = ubuntu_config("noble-20251013");
-        assert!(build_cf(&config, &[], false).is_ok());
+        assert!(build_cf(&config, &[]).is_ok());
     }
 
     #[test]
     fn ubuntu_containerfile_contains_tag() {
         let config = ubuntu_config("noble-20251013");
-        let content = build_cf(&config, &[], false).unwrap();
+        let content = build_cf(&config, &[]).unwrap();
 
         assert!(content.contains("FROM docker.io/library/ubuntu:noble-20251013 AS system"));
     }
 
     #[test]
     fn ubuntu_containerfile_tag_is_substituted() {
-        let content = build_cf(&ubuntu_config("24.04"), &[], false).unwrap();
+        let content = build_cf(&ubuntu_config("24.04"), &[]).unwrap();
 
         assert!(content.contains("FROM docker.io/library/ubuntu:24.04 AS system"));
         assert!(!content.contains("{tag}"));
@@ -314,56 +304,50 @@ mod tests {
 
     #[test]
     fn fedora_generates_successfully() {
-        assert!(build_cf(&fedora_config(), &[], false).is_ok());
+        assert!(build_cf(&fedora_config(), &[]).is_ok());
     }
 
     #[test]
     fn fedora_containerfile_contains_tag() {
-        let content = build_cf(&fedora_config(), &[], false).unwrap();
+        let content = build_cf(&fedora_config(), &[]).unwrap();
 
         assert!(content.contains("FROM registry.fedoraproject.org/fedora:latest AS system"));
     }
 
     #[test]
     fn fedora_containerfile_tag_is_substituted() {
-        let content = build_cf(&fedora_config(), &[], false).unwrap();
+        let content = build_cf(&fedora_config(), &[]).unwrap();
 
         assert!(!content.contains("{tag}"));
     }
 
     #[test]
     fn ubi_generates_successfully() {
-        assert!(build_cf(&ubi_config(), &[], false).is_ok());
+        assert!(build_cf(&ubi_config(), &[]).is_ok());
     }
 
     #[test]
     fn ubi_containerfile_contains_tag() {
-        let content = build_cf(&ubi_config(), &[], false).unwrap();
+        let content = build_cf(&ubi_config(), &[]).unwrap();
 
         assert!(content.contains("FROM registry.access.redhat.com/ubi10/ubi:latest AS system"));
     }
 
     #[test]
     fn ubi_containerfile_tag_is_substituted() {
-        let content = build_cf(&ubi_config(), &[], false).unwrap();
+        let content = build_cf(&ubi_config(), &[]).unwrap();
 
         assert!(!content.contains("{tag}"));
     }
 
     #[test]
-    fn ubi_copies_policy_yaml() {
-        let content = build_cf(&ubi_config(), &[], true).unwrap();
-        assert!(content.contains("COPY policy.yaml /etc/openshell/policy.yaml"));
-    }
-
-    #[test]
     fn hummingbird_generates_successfully() {
-        assert!(build_cf(&hummingbird_config(), &[], false).is_ok());
+        assert!(build_cf(&hummingbird_config(), &[]).is_ok());
     }
 
     #[test]
     fn hummingbird_containerfile_contains_tag() {
-        let content = build_cf(&hummingbird_config(), &[], false).unwrap();
+        let content = build_cf(&hummingbird_config(), &[]).unwrap();
 
         assert!(
             content.contains(
@@ -374,20 +358,14 @@ mod tests {
 
     #[test]
     fn hummingbird_containerfile_tag_is_substituted() {
-        let content = build_cf(&hummingbird_config(), &[], false).unwrap();
+        let content = build_cf(&hummingbird_config(), &[]).unwrap();
 
         assert!(!content.contains("{tag}"));
     }
 
     #[test]
-    fn hummingbird_copies_policy_yaml() {
-        let content = build_cf(&hummingbird_config(), &[], true).unwrap();
-        assert!(content.contains("COPY policy.yaml /etc/openshell/policy.yaml"));
-    }
-
-    #[test]
     fn hummingbird_containerfile_includes_iproute() {
-        let content = build_cf(&hummingbird_config(), &[], false).unwrap();
+        let content = build_cf(&hummingbird_config(), &[]).unwrap();
 
         assert!(
             content.contains("iproute"),
@@ -412,7 +390,7 @@ mod tests {
                 tag: "latest".to_string(),
             },
         };
-        let err = build_cf(&config, &[], false).unwrap_err();
+        let err = build_cf(&config, &[]).unwrap_err();
 
         assert_eq!(
             err,
@@ -424,7 +402,7 @@ mod tests {
     #[test]
     fn feature_copy_instruction_present() {
         let feature = mock_feature("./tools/my-feature", "feature-0");
-        let content = build_cf(&ubuntu_config("24.04"), &[feature], false).unwrap();
+        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
 
         assert!(content.contains("COPY features/feature-0/"));
         assert!(content.contains("/tmp/feature-install/feature-0/install.sh"));
@@ -436,7 +414,7 @@ mod tests {
         feature
             .merged_options
             .insert("VERSION".to_string(), "1.0".to_string());
-        let content = build_cf(&ubuntu_config("24.04"), &[feature], false).unwrap();
+        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
 
         assert!(content.contains("VERSION=\"1.0\""));
     }
@@ -447,7 +425,7 @@ mod tests {
         feature
             .container_env
             .insert("CARGO_HOME".to_string(), "/home/sandbox/.cargo".to_string());
-        let content = build_cf(&ubuntu_config("24.04"), &[feature], false).unwrap();
+        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
 
         assert!(content.contains("ENV CARGO_HOME=\"/home/sandbox/.cargo\""));
     }
@@ -455,36 +433,18 @@ mod tests {
     #[test]
     fn feature_install_dir_cleaned_up() {
         let feature = mock_feature("./tools/my-feature", "feature-0");
-        let content = build_cf(&ubuntu_config("24.04"), &[feature], false).unwrap();
+        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
 
         assert!(content.contains("RUN rm -rf /tmp/feature-install\n"));
     }
 
     #[test]
     fn no_features_produces_same_output_as_before() {
-        let with_empty = build_cf(&ubuntu_config("24.04"), &[], false).unwrap();
+        let with_empty = build_cf(&ubuntu_config("24.04"), &[]).unwrap();
 
         assert!(!with_empty.contains("# Feature:"));
         assert!(!with_empty.contains("_REMOTE_USER"));
         assert!(!with_empty.contains("rm -rf /tmp/feature-install"));
-    }
-
-    #[test]
-    fn ubuntu_copies_policy_yaml() {
-        let content = build_cf(&ubuntu_config("24.04"), &[], true).unwrap();
-        assert!(content.contains("COPY policy.yaml /etc/openshell/policy.yaml"));
-    }
-
-    #[test]
-    fn ubuntu_omits_policy_yaml_without_flag() {
-        let content = build_cf(&ubuntu_config("24.04"), &[], false).unwrap();
-        assert!(!content.contains("COPY policy.yaml /etc/openshell/policy.yaml"));
-    }
-
-    #[test]
-    fn fedora_copies_policy_yaml() {
-        let content = build_cf(&fedora_config(), &[], true).unwrap();
-        assert!(content.contains("COPY policy.yaml /etc/openshell/policy.yaml"));
     }
 
     #[test]
@@ -495,11 +455,11 @@ mod tests {
             ubi_config(),
             hummingbird_config(),
         ] {
-            let content = generate(&config, &[], false, true).unwrap();
+            let content = generate(&config, &[], true).unwrap();
             assert!(content.contains("COPY build-containerfile /tmp/build-containerfile"));
             assert!(content.contains("RUN cp /tmp/build-containerfile \"$HOME/Containerfile\""));
             assert!(!content.contains("--chown=sandbox"));
-            let without_copy = build_cf(&config, &[], false).unwrap();
+            let without_copy = build_cf(&config, &[]).unwrap();
             assert!(!without_copy.contains("build-containerfile"));
         }
     }
@@ -509,10 +469,10 @@ mod tests {
     #[test]
     fn host_ca_certificates_are_not_copied() {
         for content in [
-            build_cf(&ubuntu_config("24.04"), &[], false).unwrap(),
-            build_cf(&fedora_config(), &[], false).unwrap(),
-            build_cf(&ubi_config(), &[], false).unwrap(),
-            build_cf(&hummingbird_config(), &[], false).unwrap(),
+            build_cf(&ubuntu_config("24.04"), &[]).unwrap(),
+            build_cf(&fedora_config(), &[]).unwrap(),
+            build_cf(&ubi_config(), &[]).unwrap(),
+            build_cf(&hummingbird_config(), &[]).unwrap(),
         ] {
             assert!(
                 !content.contains("COPY certs/"),

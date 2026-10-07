@@ -17,14 +17,11 @@
 mod config;
 mod containerfile;
 mod feature;
-mod policy;
 mod vm_rootfs;
 mod workspace;
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-
-const BASE_POLICY_YAML: &str = include_str!("../assets/policy.yaml");
 
 use clap::Parser;
 use container_image_builder::{ContainerCli, ContainerRunner, Runner, build};
@@ -113,18 +110,13 @@ struct Cli {
         help = "Increase log verbosity (-v info, -vv debug)"
     )]
     verbose: u8,
-    #[arg(
-        long,
-        help = "Read .kaiden/workspace.json and apply its features and network rules"
-    )]
+    #[arg(long, help = "Read .kaiden/workspace.json and apply its features")]
     with_workspace_config: bool,
     #[arg(
         long,
         help = "Copy the build Containerfile to $HOME/Containerfile inside the image"
     )]
     copy_containerfile: bool,
-    #[arg(long, help = "Include OpenShell sandbox policy in the image")]
-    with_policy: bool,
     #[arg(
         long = "vm-rootfs",
         value_name = "DIR",
@@ -196,7 +188,6 @@ fn main() {
         &cli.tag,
         cli.config,
         cli.with_workspace_config,
-        cli.with_policy,
         cli.copy_containerfile,
         &backend,
     ) {
@@ -371,7 +362,6 @@ fn run(
     tag: &str,
     config_path: Option<PathBuf>,
     with_workspace_config: bool,
-    with_policy: bool,
     copy_containerfile: bool,
     backend: &Backend,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -385,11 +375,7 @@ fn run(
         .prefix("openshell-build-image")
         .tempdir()?;
     let features = feature::stage_all(workspace.as_ref(), context_dir.path())?;
-    if with_policy {
-        let policy_yaml = build_policy(BASE_POLICY_YAML, workspace.as_ref())?;
-        std::fs::write(context_dir.path().join("policy.yaml"), policy_yaml)?;
-    }
-    let output = containerfile::generate(&config, &features, with_policy, copy_containerfile)?;
+    let output = containerfile::generate(&config, &features, copy_containerfile)?;
     if copy_containerfile {
         std::fs::write(context_dir.path().join("build-containerfile"), &output)?;
     }
@@ -400,62 +386,6 @@ fn run(
         }
     }
     Ok(())
-}
-
-fn parse_workspace_host(s: &str) -> Result<(String, u16), Box<dyn std::error::Error>> {
-    let url_str = if s.contains("://") {
-        s.to_string()
-    } else {
-        format!("https://{s}")
-    };
-    let parsed =
-        url::Url::parse(&url_str).map_err(|e| format!("invalid workspace host '{s}': {e}"))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| format!("workspace host is missing hostname: '{s}'"))?;
-    Ok((host.to_string(), parsed.port().unwrap_or(443)))
-}
-
-fn workspace_hosts_policy(
-    hosts: &[String],
-) -> Result<policy::NetworkPolicyRule, Box<dyn std::error::Error>> {
-    let binaries = vec![
-        policy::NetworkBinary::new("/bin/**"),
-        policy::NetworkBinary::new("/usr/bin/**"),
-        policy::NetworkBinary::new("/usr/local/bin/**"),
-        policy::NetworkBinary::new("/sandbox/.local/bin/**"),
-    ];
-    Ok(policy::NetworkPolicyRule {
-        name: "workspace".to_string(),
-        endpoints: hosts
-            .iter()
-            .map(|s| {
-                parse_workspace_host(s).map(|(host, port)| policy::NetworkEndpoint {
-                    host,
-                    port,
-                    ..Default::default()
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        binaries,
-    })
-}
-
-fn build_policy(
-    base_yaml: &str,
-    workspace: Option<&workspace::WorkspaceConfiguration>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let mut sandbox_policy = policy::parse_sandbox_policy(base_yaml)?;
-    if let Some(hosts) = workspace
-        .and_then(|ws| ws.network.as_ref())
-        .map(|net| net.hosts.as_slice())
-        .filter(|h| !h.is_empty())
-    {
-        sandbox_policy
-            .network_policies
-            .insert("workspace".to_string(), workspace_hosts_policy(hosts)?);
-    }
-    Ok(policy::serialize_sandbox_policy(&sandbox_policy)?)
 }
 
 #[cfg(test)]
@@ -575,15 +505,6 @@ mod tests {
     }
 
     #[test]
-    fn build_policy_without_workspace_preserves_base_policy() {
-        let yaml = build_policy(BASE_POLICY_YAML, None).unwrap();
-        assert_eq!(
-            serde_yml::from_str::<serde_yml::Value>(&yaml).unwrap(),
-            serde_yml::from_str::<serde_yml::Value>(BASE_POLICY_YAML).unwrap()
-        );
-    }
-
-    #[test]
     fn copy_containerfile_flag_is_opt_in() {
         let cli = Cli::try_parse_from(["test", "--runtime", "podman", "test:latest"]).unwrap();
         assert!(!cli.copy_containerfile);
@@ -627,7 +548,6 @@ mod tests {
                 "test:latest",
                 Some(tmp.path().to_path_buf()),
                 false,
-                false,
                 enabled,
                 &Backend::Cli(&ContainerCli::Podman, &CopyChecker(enabled)),
             )
@@ -645,7 +565,6 @@ mod tests {
             Some(tmp.path().to_path_buf()),
             false,
             false,
-            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -659,95 +578,9 @@ mod tests {
             Some(tmp.path().to_path_buf()),
             false,
             false,
-            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(1)),
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn run_with_policy_flag_succeeds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = run(
-            "test:latest",
-            Some(tmp.path().to_path_buf()),
-            false,
-            true,
-            false,
-            &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
-        );
-        assert!(result.is_ok(), "expected Ok, got {result:?}");
-    }
-
-    // parse_workspace_host
-
-    #[test]
-    fn parse_workspace_host_defaults_to_443() {
-        let (host, port) = parse_workspace_host("example.com").unwrap();
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 443);
-    }
-
-    #[test]
-    fn parse_workspace_host_respects_explicit_port() {
-        let (host, port) = parse_workspace_host("example.com:8080").unwrap();
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 8080);
-    }
-
-    #[test]
-    fn parse_workspace_host_with_full_https_url() {
-        let (host, port) = parse_workspace_host("https://example.com:8443").unwrap();
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 8443);
-    }
-
-    #[test]
-    fn parse_workspace_host_fails_on_invalid_input() {
-        assert!(parse_workspace_host("not a valid host !!!").is_err());
-    }
-
-    // workspace_hosts_policy
-
-    #[test]
-    fn workspace_hosts_policy_includes_glob_binaries() {
-        let hosts = vec!["example.com".to_string()];
-        let rule = workspace_hosts_policy(&hosts).unwrap();
-        let paths: Vec<&str> = rule.binaries.iter().map(|b| b.path.as_str()).collect();
-        assert!(paths.contains(&"/bin/**"));
-        assert!(paths.contains(&"/usr/bin/**"));
-        assert!(paths.contains(&"/usr/local/bin/**"));
-        assert!(paths.contains(&"/sandbox/.local/bin/**"));
-        assert_eq!(paths.len(), 4);
-    }
-
-    #[test]
-    fn workspace_hosts_policy_fails_on_invalid_host() {
-        let hosts = vec!["not a valid host !!!".to_string()];
-        assert!(workspace_hosts_policy(&hosts).is_err());
-    }
-
-    // build_policy with workspace hosts
-
-    #[test]
-    fn build_policy_with_workspace_hosts_includes_host() {
-        use kdn_workspace_configuration::{NetworkConfiguration, NetworkConfigurationMode};
-        let mut ws = workspace::WorkspaceConfiguration::default();
-        ws.network = Some(NetworkConfiguration {
-            hosts: vec!["myhost.example.com".to_string()],
-            mode: NetworkConfigurationMode::Deny,
-        });
-        let yaml = build_policy(BASE_POLICY_YAML, Some(&ws)).unwrap();
-        assert!(yaml.contains("myhost.example.com"));
-        assert!(yaml.contains("workspace"));
-    }
-
-    #[test]
-    fn build_policy_with_empty_network_hosts_unchanged() {
-        let ws = workspace::WorkspaceConfiguration::default();
-        let yaml_no_ws = build_policy(BASE_POLICY_YAML, None).unwrap();
-        let yaml_ws = build_policy(BASE_POLICY_YAML, Some(&ws)).unwrap();
-        assert_eq!(yaml_no_ws, yaml_ws);
     }
 
     #[test]
@@ -757,7 +590,6 @@ mod tests {
         run(
             "test:latest",
             Some(tmp.path().to_path_buf()),
-            false,
             false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
@@ -967,7 +799,6 @@ mod tests {
             Some(tmp.path().to_path_buf()),
             false,
             false,
-            false,
             &Backend::Vm(&config, &runner, &output),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -985,7 +816,6 @@ mod tests {
         run(
             "test:latest",
             Some(tmp.path().to_path_buf()),
-            false,
             false,
             true,
             &Backend::Vm(&config, &runner, &tmp.path().join("out.tar")),
@@ -1017,7 +847,6 @@ mod tests {
         let result = run(
             "test:latest",
             Some(tmp.path().to_path_buf()),
-            false,
             false,
             false,
             &Backend::Vm(&config, &FailingVmRunner, &tmp.path().join("out.tar")),
