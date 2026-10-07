@@ -6,7 +6,7 @@ OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/Op
 
 The tool assembles the image from a base image and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
-1. **Base image** — chosen via a config file, defaults to Ubuntu 24.04. The builder uses the packages already present in the base image; it does not automatically install system tools.
+1. **Project image** — supplied with the required `--from` flag, with the tools your project needs already installed. The builder uses the packages already present in this image; it does not automatically install system tools.
 2. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
 
 Built-in agent installation and configuration have been removed. OCI addon support is tracked in [#178](https://github.com/openkaiden/openshell-build-image/issues/178).
@@ -30,10 +30,10 @@ Built-in agent installation and configuration have been removed. OCI addon suppo
 Build an image with a single command:
 
 ```sh
-openshell-build-image --runtime podman myimage:latest
+openshell-build-image --runtime podman --from myproject:dev myimage:latest
 ```
 
-`<TAG>` and `--runtime` are the only required arguments — `--runtime` selects the build backend (`podman`, `docker`, `container`, or `vm`), and `<TAG>` sets the tag for the built image. By default, the tool uses Ubuntu 24.04 as the base image.
+`--from`, `--runtime`, and `<TAG>` are required. `--from` selects the project image to extend, `--runtime` selects the build backend (`podman`, `docker`, `container`, or `vm`), and `<TAG>` names the result. There is no default base image.
 
 ## Building in a VM (`--runtime vm`)
 
@@ -46,7 +46,7 @@ The VM runs its own kernel in its own process namespace and sees only three dire
 This is the one way `--runtime vm` differs from the others in its result. A container CLI leaves a tagged image in its local image store. The VM has no access to that store, so it writes a **flattened rootfs tarball** instead:
 
 ```sh
-openshell-build-image --runtime vm myimage:latest
+openshell-build-image --runtime vm --from ghcr.io/example/myproject:dev myimage:latest
 # -> ./myimage-latest.tar
 ```
 
@@ -86,7 +86,7 @@ Only needed to change what the build VM contains. It takes Podman on a `linux/ar
 ```sh
 make build-vm-rootfs                  # writes vm-rootfs/ and vm-rootfs.tar
 make build-vm                         # embeds the tarball in the binary
-make run-vm TAG=myimage:latest        # builds an image with it
+make run-vm FROM=ghcr.io/example/myproject:dev TAG=myimage:latest
 ```
 
 Or point at the directory without embedding anything: `--vm-rootfs ./vm-rootfs`. `make help` lists the rest.
@@ -98,6 +98,7 @@ Or point at the directory without embedding anything: `--vm-rootfs ./vm-rootfs`.
 ```sh
 openshell-build-image \
   --runtime vm \
+  --from ghcr.io/example/myproject:dev \
   --vm-cpus 4 \
   --vm-memory 8192 \
   myimage:latest
@@ -112,101 +113,31 @@ So the build reads the host's own nameservers on each run and hands them to the 
 Override it when the host's resolvers are not the ones the build should use:
 
 ```sh
-openshell-build-image --runtime vm --vm-dns 10.0.0.53 --vm-dns 10.0.0.54 myimage:latest
+openshell-build-image --runtime vm --from ghcr.io/example/myproject:dev --vm-dns 10.0.0.53 --vm-dns 10.0.0.54 myimage:latest
 ```
 
 A loopback address is rejected: inside the VM, loopback is the VM. If the host resolves through one — systemd-resolved, a VPN client's local stub — pass the address it forwards to instead. When the host has no usable nameserver at all, the VM falls back to `1.1.1.1`.
 
-## Configuring the base image
+## Choosing the project image
 
-To use a different base image or tag, create a configuration file.
-
-### File location
-
-The tool looks for a `config.toml` file in this order, using the first directory found:
-
-1. Directory given by the `--config` flag
-2. Directory set in the `OPENSHELL_BUILD_IMAGE_CONFIG` environment variable
-3. The platform config directory:
-   - Linux: `$XDG_CONFIG_HOME/openshell-build-image/` (defaults to `~/.config/openshell-build-image/`)
-   - macOS: `~/Library/Application Support/openshell-build-image/`
-   - Windows: `%APPDATA%\openshell-build-image\`
-
-If no `config.toml` is found in the resolved directory, or the file is empty, built-in defaults are used.
-
-If a directory is given explicitly (via `--config` or the environment variable) but it does not exist, the command fails immediately.
-
-### Base images
-
-**Ubuntu** (default)
-
-```toml
-[openshell_build_image.base_image]
-image = "ubuntu"
-tag   = "24.04"
-```
-
-**Fedora**
-
-```toml
-[openshell_build_image.base_image]
-image = "fedora"
-tag   = "latest"
-```
-
-**Red Hat UBI**
-
-```toml
-[openshell_build_image.base_image]
-image = "ubi"
-tag   = "latest"
-```
-
-**Red Hat Hardened Images (Hummingbird)**
-
-```toml
-[openshell_build_image.base_image]
-image = "hummingbird"
-tag   = "latest-builder"
-```
-
-### Full schema reference
-
-```toml
-[openshell_build_image]
-version = 1
-
-[openshell_build_image.base_image]
-image = "ubuntu"   # "ubuntu", "fedora", "ubi", or "hummingbird"
-tag   = "24.04"
-```
-
-| Field                                      | Default  | Description                  |
-| ------------------------------------------ | -------- | ---------------------------- |
-| `openshell_build_image.version`          | `1`      | Configuration schema version |
-| `openshell_build_image.base_image.image` | `ubuntu` | Base image name (`ubuntu`, `fedora`, `ubi`, or `hummingbird`) |
-| `openshell_build_image.base_image.tag`   | `24.04`  | Base image tag — Ubuntu: `24.04`, `22.04`, …; Fedora: `latest`, `43`, `42`, …; UBI: `latest`, `10.2-1780377767`, …; Hummingbird: `latest-builder`, … |
-
-### Loading from a specific config directory
-
-Pass `--config` to point to a directory explicitly (the tool reads `config.toml` inside it):
+Pass `--from <IMAGE>` to extend an image prepared for your project. Image names, tags, registry ports, and digests are passed directly to the build engine; there is no list of supported distributions.
 
 ```sh
-openshell-build-image --runtime podman --config /path/to/config/dir myimage:latest
+openshell-build-image --runtime podman --from localhost:5000/myproject:dev myimage:latest
+openshell-build-image --runtime podman --from registry.fedoraproject.org/fedora:latest fedora-project:latest
+openshell-build-image --runtime podman --from docker.io/library/alpine:3.24 alpine-project:latest
 ```
 
-Or set the environment variable instead:
+For a pinned image, use `--from registry.example.com/myproject@sha256:<digest>` with its full digest. The VM backend pulls the image into its own Buildah store, so it needs a registry reference accessible from the VM rather than an image present only in the host's store.
 
-```sh
-OPENSHELL_BUILD_IMAGE_CONFIG=/path/to/config/dir openshell-build-image myimage:latest
-```
+Base-image configuration files, `--config`, and `OPENSHELL_BUILD_IMAGE_CONFIG` are no longer used. `.kaiden/workspace.json` remains available through `--with-workspace-config`. Feature install scripts must support the selected image and have the tools they need available in it.
 
 ## Logging
 
-Use `-v` (info) or `-vv` (debug) to increase log verbosity — useful for tracing which config file is loaded:
+Use `-v` (info) or `-vv` (debug) to increase log verbosity — useful for tracing feature staging and builds:
 
 ```sh
-openshell-build-image --runtime podman -v myimage:latest
+openshell-build-image --runtime podman --from myproject:dev -v myimage:latest
 ```
 
 OpenShell manages CA certificates for the sandbox. The image builder does not discover or copy the host's CA bundle into images.
@@ -281,21 +212,21 @@ Features run as root so install scripts can write to system paths.
 Pass `--copy-containerfile` to include the exact Containerfile used for the build at `$HOME/Containerfile` **inside the image**, using the home directory and user inherited from the base image.
 
 ```sh
-openshell-build-image --runtime podman --copy-containerfile myimage:latest
+openshell-build-image --runtime podman --from myproject:dev --copy-containerfile myimage:latest
 podman run --rm --entrypoint /bin/sh myimage:latest -c 'cat "$HOME/Containerfile"'
 ```
 
 ## Full option reference
 
 ```
-openshell-build-image [OPTIONS] <TAG>
+openshell-build-image --runtime <RUNTIME> --from <IMAGE> [OPTIONS] <TAG>
 ```
 
 | Argument / Option              | Description                                                        |
 | ------------------------------ | ------------------------------------------------------------------ |
 | `<TAG>`                        | Tag for the built image (e.g. `myimage:latest`)                    |
 | `--runtime <RUNTIME>`          | Backend to build the image with (`podman`, `docker`, `container`, `vm` — see [Building in a VM](#building-in-a-vm---runtime-vm)) |
-| `--config <CONFIG>`            | Path to config directory containing `config.toml` (env: `OPENSHELL_BUILD_IMAGE_CONFIG`) |
+| `--from <IMAGE>`               | Required project image to build from (name, tag, or digest) |
 | `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features |
 | `--copy-containerfile`         | Copy the build Containerfile to `$HOME/Containerfile` inside the image |
 | `--vm-rootfs <DIR>`            | Root filesystem the build VM boots from (`--runtime vm` only). Defaults to the one embedded in the binary. |
@@ -313,6 +244,7 @@ With Dev Container Features declared in `.kaiden/workspace.json`, build the imag
 
 ```sh
 openshell-build-image --runtime podman \
+  --from myproject:dev \
   --with-workspace-config \
   myproject:latest
 ```

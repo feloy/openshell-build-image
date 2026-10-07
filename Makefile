@@ -54,8 +54,8 @@ help:
 	@echo "build-vm-rootfs    Build the root filesystem the build VM boots from"
 	@echo "                   (needs podman on linux/arm64)"
 	@echo ""
-	@echo "run                Build an image: make run TAG=myimage:latest [RUNTIME=docker]"
-	@echo "run-vm             The same through a VM: make run-vm TAG=myimage:latest"
+	@echo "run                Build an image: make run FROM=myproject:dev TAG=myimage:latest [RUNTIME=docker]"
+	@echo "run-vm             The same through a VM: make run-vm FROM=ghcr.io/example/myproject:dev TAG=myimage:latest"
 	@echo "                   (the exported filesystem lands under target/)"
 	@echo ""
 	@echo "check              Format, lint and test — run this before committing"
@@ -88,10 +88,13 @@ build-vm-rootfs:
 
 .PHONY: run
 run: build
-ifndef TAG
-	$(error TAG is required: make run TAG=myimage:latest)
+ifndef FROM
+	$(error FROM is required: specify the project image with FROM=registry/project:tag)
 endif
-	$(BINARY) --runtime $(RUNTIME) $(ARGS) $(TAG)
+ifndef TAG
+	$(error TAG is required: make run FROM=myproject:dev TAG=myimage:latest)
+endif
+	$(BINARY) --runtime $(RUNTIME) --from "$(FROM)" $(ARGS) $(TAG)
 
 # libkrun opens its kernel by name at run time, and nothing points it at
 # Homebrew's directory on its own.
@@ -100,11 +103,14 @@ endif
 # than into the working copy, where it would sit untracked.
 .PHONY: run-vm
 run-vm: build-vm
+ifndef FROM
+	$(error FROM is required: specify the project image with FROM=registry/project:tag)
+endif
 ifndef TAG
-	$(error TAG is required: make run-vm TAG=myimage:latest)
+	$(error TAG is required: make run-vm FROM=ghcr.io/example/myproject:dev TAG=myimage:latest)
 endif
 	DYLD_LIBRARY_PATH="$(BREW_PREFIX)/lib" \
-	$(BINARY) --runtime vm $(ARGS) --vm-output target/$(subst :,-,$(subst /,-,$(TAG))).tar $(TAG)
+	$(BINARY) --runtime vm --from "$(FROM)" $(ARGS) --vm-output target/$(subst :,-,$(subst /,-,$(TAG))).tar $(TAG)
 
 # --workspace because a plain `cargo test` runs only the root package, which
 # leaves both library crates untested.

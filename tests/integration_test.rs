@@ -18,7 +18,7 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 #[test]
-fn removed_agent_options_are_rejected() {
+fn removed_options_are_rejected() {
     let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     for args in [
         vec!["--agent", "claude"],
@@ -26,9 +26,16 @@ fn removed_agent_options_are_rejected() {
         vec!["--inference", "anthropic"],
         vec!["--endpoint", "https://example.com"],
         vec!["--model", "example-model"],
+        vec!["--config", "/unused"],
     ] {
         let output = Command::new(binary)
-            .args(["--runtime", "podman", "should-not-be-built:test"])
+            .args([
+                "--runtime",
+                "podman",
+                "--from",
+                "alpine:3.24",
+                "should-not-be-built:test",
+            ])
             .args(&args)
             .output()
             .expect("binary should run");
@@ -52,7 +59,8 @@ mod copy_containerfile_cli {
     fn stages_exact_containerfile_without_modifying_host_home() {
         for enabled in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let config = fedora_config_dir();
+            // Old config files and their environment variable must not affect --from.
+            std::fs::write(dir.path().join("config.toml"), "invalid old config").unwrap();
             let runtime = dir.path().join("podman");
             std::fs::write(
                 &runtime,
@@ -71,12 +79,11 @@ fi
             let used = dir.path().join("used-containerfile");
             let staged = dir.path().join("staged-containerfile");
             let mut cmd = Command::new(env!("CARGO_BIN_EXE_openshell-build-image"));
-            cmd.args(["--runtime", "podman", "test:copy"])
-                .arg("--config")
-                .arg(config.path())
+            cmd.args(["--runtime", "podman", "--from", FEDORA, "test:copy"])
                 .current_dir(dir.path())
                 .env("HOME", dir.path())
                 .env("PATH", dir.path())
+                .env("OPENSHELL_BUILD_IMAGE_CONFIG", dir.path())
                 .env("TEST_CAPTURE_FILE", &used)
                 .env("TEST_STAGED_FILE", &staged);
             if enabled {
@@ -87,6 +94,11 @@ fi
             assert_eq!(
                 std::fs::read_to_string(host_copy).unwrap(),
                 "keep host file"
+            );
+            assert!(
+                std::fs::read_to_string(&used)
+                    .unwrap()
+                    .contains(&format!("FROM {FEDORA} AS system"))
             );
             assert_eq!(staged.exists(), enabled);
             if enabled {
@@ -107,12 +119,13 @@ fi
 mod copy_containerfile {
     use super::*;
 
-    static IMAGE: OnceLock<String> = OnceLock::new();
+    pub(super) static IMAGE: OnceLock<String> = OnceLock::new();
 
     fn image() -> &'static str {
         IMAGE.get_or_init(|| {
             build_image(
                 "openshell-test-copy-containerfile:integration",
+                ALPINE,
                 &["--copy-containerfile"],
             )
         })
@@ -124,7 +137,7 @@ mod copy_containerfile {
         let output = run_in_image(image(), "cat \"$HOME/Containerfile\"");
         assert!(output.status.success(), "{:?}", output);
         let content = String::from_utf8_lossy(&output.stdout);
-        assert!(content.contains("FROM docker.io/library/ubuntu:24.04 AS system"));
+        assert!(content.contains("FROM docker.io/library/alpine:3.24 AS system"));
         assert!(content.contains("COPY build-containerfile /tmp/build-containerfile"));
     }
 
@@ -150,40 +163,16 @@ mod copy_containerfile {
 // Image build helpers
 // ---------------------------------------------------------------------------
 
-fn fedora_config_dir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("config.toml"),
-        "[openshell_build_image.base_image]\nimage = \"fedora\"\ntag = \"latest\"\n",
-    )
-    .unwrap();
-    dir
-}
+const UBUNTU: &str = "docker.io/library/ubuntu:24.04";
+const FEDORA: &str = "registry.fedoraproject.org/fedora:latest";
+const ALPINE: &str = "docker.io/library/alpine:3.24";
+const UBI: &str = "registry.access.redhat.com/ubi10/ubi:latest";
+const HUMMINGBIRD: &str = "registry.access.redhat.com/hi/core-runtime:latest-builder";
 
-fn ubi_config_dir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("config.toml"),
-        "[openshell_build_image.base_image]\nimage = \"ubi\"\ntag = \"latest\"\n",
-    )
-    .unwrap();
-    dir
-}
-
-fn hummingbird_config_dir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("config.toml"),
-        "[openshell_build_image.base_image]\nimage = \"hummingbird\"\ntag = \"latest-builder\"\n",
-    )
-    .unwrap();
-    dir
-}
-
-fn build_image(tag: &str, extra_args: &[&str]) -> String {
+fn build_image(tag: &str, from: &str, extra_args: &[&str]) -> String {
     let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
-        .args(["--runtime", "podman"])
+        .args(["--runtime", "podman", "--from", from])
         .args(extra_args)
         .arg(tag)
         .status()
@@ -194,7 +183,7 @@ fn build_image(tag: &str, extra_args: &[&str]) -> String {
 
 fn run_in_image(image: &str, cmd: &str) -> Output {
     Command::new("podman")
-        .args(["run", "--rm", "--entrypoint", "/bin/bash", image, "-c", cmd])
+        .args(["run", "--rm", "--entrypoint", "/bin/sh", image, "-c", cmd])
         .output()
         .expect("podman run should execute")
 }
@@ -204,6 +193,7 @@ fn run_in_image(image: &str, cmd: &str) -> Output {
 // ---------------------------------------------------------------------------
 
 static UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
+static ALPINE_IMAGE: OnceLock<String> = OnceLock::new();
 static FEDORA_IMAGE: OnceLock<String> = OnceLock::new();
 static UBI_IMAGE: OnceLock<String> = OnceLock::new();
 static HUMMINGBIRD_IMAGE: OnceLock<String> = OnceLock::new();
@@ -211,37 +201,24 @@ static NO_WORKSPACE_CONFIG_OCI_FEATURE_UBUNTU_IMAGE: OnceLock<String> = OnceLock
 static NO_WORKSPACE_CONFIG_LOCAL_FEATURE_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
 
 fn ubuntu_image() -> &'static str {
-    UBUNTU_IMAGE.get_or_init(|| build_image("openshell-test-ubuntu:integration", &[]))
+    UBUNTU_IMAGE.get_or_init(|| build_image("openshell-test-ubuntu:integration", UBUNTU, &[]))
+}
+
+fn alpine_image() -> &'static str {
+    ALPINE_IMAGE.get_or_init(|| build_image("openshell-test-alpine:integration", ALPINE, &[]))
 }
 
 fn fedora_image() -> &'static str {
-    FEDORA_IMAGE.get_or_init(|| {
-        let config = fedora_config_dir();
-        build_image(
-            "openshell-test-fedora:integration",
-            &["--config", config.path().to_str().unwrap()],
-        )
-    })
+    FEDORA_IMAGE.get_or_init(|| build_image("openshell-test-fedora:integration", FEDORA, &[]))
 }
 
 fn ubi_image() -> &'static str {
-    UBI_IMAGE.get_or_init(|| {
-        let config = ubi_config_dir();
-        build_image(
-            "openshell-test-ubi:integration",
-            &["--config", config.path().to_str().unwrap()],
-        )
-    })
+    UBI_IMAGE.get_or_init(|| build_image("openshell-test-ubi:integration", UBI, &[]))
 }
 
 fn hummingbird_image() -> &'static str {
-    HUMMINGBIRD_IMAGE.get_or_init(|| {
-        let config = hummingbird_config_dir();
-        build_image(
-            "openshell-test-hummingbird:integration",
-            &["--config", config.path().to_str().unwrap()],
-        )
-    })
+    HUMMINGBIRD_IMAGE
+        .get_or_init(|| build_image("openshell-test-hummingbird:integration", HUMMINGBIRD, &[]))
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +265,7 @@ fn check_opencode_in_path(image: &str, expected: bool) {
 // ---------------------------------------------------------------------------
 
 macro_rules! image_tests {
-    ($mod_name:ident, $image_fn:ident, $base_image:literal) => {
+    ($mod_name:ident, $image_fn:ident, $base_image:expr) => {
         mod $mod_name {
             use super::*;
 
@@ -313,7 +290,8 @@ macro_rules! image_tests {
     };
 }
 
-image_tests!(ubuntu, ubuntu_image, "docker.io/library/ubuntu:24.04");
+image_tests!(ubuntu, ubuntu_image, UBUNTU);
+image_tests!(alpine, alpine_image, ALPINE);
 image_tests!(
     fedora,
     fedora_image,
@@ -342,12 +320,17 @@ fn workspace_dir(workspace_json: &str) -> tempfile::TempDir {
     dir
 }
 
-fn build_image_with_workspace(tag: &str, workspace_json: &str, extra_args: &[&str]) -> String {
+fn build_image_with_workspace(
+    tag: &str,
+    from: &str,
+    workspace_json: &str,
+    extra_args: &[&str],
+) -> String {
     let dir = workspace_dir(workspace_json);
     let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
-        .args(["--runtime", "podman"])
+        .args(["--runtime", "podman", "--from", from])
         .arg("--with-workspace-config")
         .args(extra_args)
         .arg(tag)
@@ -358,7 +341,7 @@ fn build_image_with_workspace(tag: &str, workspace_json: &str, extra_args: &[&st
 }
 
 // ---------------------------------------------------------------------------
-// Feature image singletons — ubuntu (default) and fedora variants
+// Feature image singletons — explicit project images
 // ---------------------------------------------------------------------------
 
 static FEATURE_COMMON_UTILS_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
@@ -371,6 +354,7 @@ static FEATURE_COMMON_UTILS_UBI_IMAGE: OnceLock<String> = OnceLock::new();
 static FEATURE_NODE_UBI_IMAGE: OnceLock<String> = OnceLock::new();
 static FEATURE_PYTHON_UBI_IMAGE: OnceLock<String> = OnceLock::new();
 static FEATURE_LOCAL_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
+static FEATURE_LOCAL_ALPINE_IMAGE: OnceLock<String> = OnceLock::new();
 static FEATURE_LOCAL_FEDORA_IMAGE: OnceLock<String> = OnceLock::new();
 static FEATURE_LOCAL_UBI_IMAGE: OnceLock<String> = OnceLock::new();
 
@@ -403,6 +387,7 @@ fn feature_common_utils_ubuntu_image() -> &'static str {
     FEATURE_COMMON_UTILS_UBUNTU_IMAGE.get_or_init(|| {
         build_image_with_workspace(
             "openshell-test-feature-common-utils-ubuntu:integration",
+            UBUNTU,
             COMMON_UTILS_WORKSPACE,
             &[],
         )
@@ -413,6 +398,7 @@ fn feature_node_ubuntu_image() -> &'static str {
     FEATURE_NODE_UBUNTU_IMAGE.get_or_init(|| {
         build_image_with_workspace(
             "openshell-test-feature-node-ubuntu:integration",
+            UBUNTU,
             NODE_WORKSPACE,
             &[],
         )
@@ -423,6 +409,7 @@ fn feature_python_ubuntu_image() -> &'static str {
     FEATURE_PYTHON_UBUNTU_IMAGE.get_or_init(|| {
         build_image_with_workspace(
             "openshell-test-feature-python-ubuntu:integration",
+            UBUNTU,
             PYTHON_WORKSPACE,
             &[],
         )
@@ -431,66 +418,66 @@ fn feature_python_ubuntu_image() -> &'static str {
 
 fn feature_common_utils_fedora_image() -> &'static str {
     FEATURE_COMMON_UTILS_FEDORA_IMAGE.get_or_init(|| {
-        let config = fedora_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-common-utils-fedora:integration",
+            FEDORA,
             COMMON_UTILS_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
 
 fn feature_node_fedora_image() -> &'static str {
     FEATURE_NODE_FEDORA_IMAGE.get_or_init(|| {
-        let config = fedora_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-node-fedora:integration",
+            FEDORA,
             NODE_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
 
 fn feature_python_fedora_image() -> &'static str {
     FEATURE_PYTHON_FEDORA_IMAGE.get_or_init(|| {
-        let config = fedora_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-python-fedora:integration",
+            FEDORA,
             PYTHON_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
 
 fn feature_common_utils_ubi_image() -> &'static str {
     FEATURE_COMMON_UTILS_UBI_IMAGE.get_or_init(|| {
-        let config = ubi_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-common-utils-ubi:integration",
+            UBI,
             COMMON_UTILS_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
 
 fn feature_node_ubi_image() -> &'static str {
     FEATURE_NODE_UBI_IMAGE.get_or_init(|| {
-        let config = ubi_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-node-ubi:integration",
+            UBI,
             NODE_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
 
 fn feature_python_ubi_image() -> &'static str {
     FEATURE_PYTHON_UBI_IMAGE.get_or_init(|| {
-        let config = ubi_config_dir();
         build_image_with_workspace(
             "openshell-test-feature-python-ubi:integration",
+            UBI,
             PYTHON_WORKSPACE,
-            &["--config", config.path().to_str().unwrap()],
+            &[],
         )
     })
 }
@@ -523,12 +510,12 @@ fn local_feature_workspace_dir() -> tempfile::TempDir {
     dir
 }
 
-fn build_image_with_local_feature(tag: &str, extra_args: &[&str]) -> String {
+fn build_image_with_local_feature(tag: &str, from: &str, extra_args: &[&str]) -> String {
     let dir = local_feature_workspace_dir();
     let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
-        .args(["--runtime", "podman"])
+        .args(["--runtime", "podman", "--from", from])
         .arg("--with-workspace-config")
         .args(extra_args)
         .arg(tag)
@@ -540,27 +527,37 @@ fn build_image_with_local_feature(tag: &str, extra_args: &[&str]) -> String {
 
 fn feature_local_ubuntu_image() -> &'static str {
     FEATURE_LOCAL_UBUNTU_IMAGE.get_or_init(|| {
-        build_image_with_local_feature("openshell-test-feature-local-ubuntu:integration", &[])
+        build_image_with_local_feature(
+            "openshell-test-feature-local-ubuntu:integration",
+            UBUNTU,
+            &[],
+        )
+    })
+}
+
+fn feature_local_alpine_image() -> &'static str {
+    FEATURE_LOCAL_ALPINE_IMAGE.get_or_init(|| {
+        build_image_with_local_feature(
+            "openshell-test-feature-local-alpine:integration",
+            ALPINE,
+            &[],
+        )
     })
 }
 
 fn feature_local_fedora_image() -> &'static str {
     FEATURE_LOCAL_FEDORA_IMAGE.get_or_init(|| {
-        let config = fedora_config_dir();
         build_image_with_local_feature(
             "openshell-test-feature-local-fedora:integration",
-            &["--config", config.path().to_str().unwrap()],
+            FEDORA,
+            &[],
         )
     })
 }
 
 fn feature_local_ubi_image() -> &'static str {
     FEATURE_LOCAL_UBI_IMAGE.get_or_init(|| {
-        let config = ubi_config_dir();
-        build_image_with_local_feature(
-            "openshell-test-feature-local-ubi:integration",
-            &["--config", config.path().to_str().unwrap()],
-        )
+        build_image_with_local_feature("openshell-test-feature-local-ubi:integration", UBI, &[])
     })
 }
 
@@ -570,12 +567,17 @@ fn feature_local_ubi_image() -> &'static str {
 
 /// Like build_image_with_workspace but WITHOUT --with-workspace-config, so the
 /// workspace file is present on disk but deliberately ignored by the tool.
-fn build_image_in_workspace_dir(tag: &str, workspace_json: &str, extra_args: &[&str]) -> String {
+fn build_image_in_workspace_dir(
+    tag: &str,
+    from: &str,
+    workspace_json: &str,
+    extra_args: &[&str],
+) -> String {
     let dir = workspace_dir(workspace_json);
     let binary = env!("CARGO_BIN_EXE_openshell-build-image");
     let status = Command::new(binary)
         .current_dir(dir.path())
-        .args(["--runtime", "podman"])
+        .args(["--runtime", "podman", "--from", from])
         .args(extra_args)
         .arg(tag)
         .status()
@@ -588,6 +590,7 @@ fn no_workspace_config_oci_feature_ubuntu_image() -> &'static str {
     NO_WORKSPACE_CONFIG_OCI_FEATURE_UBUNTU_IMAGE.get_or_init(|| {
         build_image_in_workspace_dir(
             "openshell-test-no-workspace-config-oci-feature-ubuntu:integration",
+            UBUNTU,
             COMMON_UTILS_WORKSPACE,
             &[],
         )
@@ -600,7 +603,7 @@ fn no_workspace_config_local_feature_ubuntu_image() -> &'static str {
         let binary = env!("CARGO_BIN_EXE_openshell-build-image");
         let status = Command::new(binary)
             .current_dir(dir.path())
-            .args(["--runtime", "podman"])
+            .args(["--runtime", "podman", "--from", UBUNTU])
             .arg("openshell-test-no-workspace-config-local-feature-ubuntu:integration")
             .status()
             .expect("binary should run");
@@ -747,6 +750,11 @@ feature_local_tests!(
     fedora_image
 );
 feature_local_tests!(feature_local_ubi, feature_local_ubi_image, ubi_image);
+feature_local_tests!(
+    feature_local_alpine,
+    feature_local_alpine_image,
+    alpine_image
+);
 
 feature_common_utils_tests!(
     feature_common_utils_ubuntu,
@@ -856,29 +864,35 @@ mod host_certificates {
 
 #[ctor::dtor]
 fn cleanup_images() {
-    for tag in [
-        "openshell-test-copy-containerfile:integration",
-        "openshell-test-ubuntu:integration",
-        "openshell-test-fedora:integration",
-        "openshell-test-ubi:integration",
-        "openshell-test-feature-common-utils-ubuntu:integration",
-        "openshell-test-feature-node-ubuntu:integration",
-        "openshell-test-feature-python-ubuntu:integration",
-        "openshell-test-feature-common-utils-fedora:integration",
-        "openshell-test-feature-node-fedora:integration",
-        "openshell-test-feature-python-fedora:integration",
-        "openshell-test-feature-common-utils-ubi:integration",
-        "openshell-test-feature-node-ubi:integration",
-        "openshell-test-feature-python-ubi:integration",
-        "openshell-test-feature-local-ubuntu:integration",
-        "openshell-test-feature-local-fedora:integration",
-        "openshell-test-feature-local-ubi:integration",
-        "openshell-test-no-workspace-config-oci-feature-ubuntu:integration",
-        "openshell-test-no-workspace-config-local-feature-ubuntu:integration",
+    // Only remove images built by this test process.
+    for image in [
+        &copy_containerfile::IMAGE,
+        &UBUNTU_IMAGE,
+        &FEDORA_IMAGE,
+        &ALPINE_IMAGE,
+        &UBI_IMAGE,
+        &HUMMINGBIRD_IMAGE,
+        &FEATURE_COMMON_UTILS_UBUNTU_IMAGE,
+        &FEATURE_NODE_UBUNTU_IMAGE,
+        &FEATURE_PYTHON_UBUNTU_IMAGE,
+        &FEATURE_COMMON_UTILS_FEDORA_IMAGE,
+        &FEATURE_NODE_FEDORA_IMAGE,
+        &FEATURE_PYTHON_FEDORA_IMAGE,
+        &FEATURE_COMMON_UTILS_UBI_IMAGE,
+        &FEATURE_NODE_UBI_IMAGE,
+        &FEATURE_PYTHON_UBI_IMAGE,
+        &FEATURE_LOCAL_UBUNTU_IMAGE,
+        &FEATURE_LOCAL_FEDORA_IMAGE,
+        &FEATURE_LOCAL_ALPINE_IMAGE,
+        &FEATURE_LOCAL_UBI_IMAGE,
+        &NO_WORKSPACE_CONFIG_OCI_FEATURE_UBUNTU_IMAGE,
+        &NO_WORKSPACE_CONFIG_LOCAL_FEATURE_UBUNTU_IMAGE,
     ] {
-        Command::new("podman")
-            .args(["rmi", "--force", tag])
-            .status()
-            .ok();
+        if let Some(tag) = image.get() {
+            Command::new("podman")
+                .args(["rmi", "--force", tag])
+                .status()
+                .ok();
+        }
     }
 }

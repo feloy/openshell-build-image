@@ -90,4 +90,4 @@ if [ -n "$ARCHIVE_OUT" ]; then
 fi
 echo ""
 echo "Build an image with it:"
-echo "  openshell-build-image --runtime vm --vm-rootfs $ROOTFS myimage:latest"
+echo "  openshell-build-image --runtime vm --from registry.example.com/myproject:dev --vm-rootfs $ROOTFS myimage:latest"

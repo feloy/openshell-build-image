@@ -14,45 +14,45 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::config::Config;
 use crate::feature::StagedFeature;
 
 #[derive(Debug, PartialEq)]
 pub enum ContainerfileError {
-    NotSupported { image: String },
+    InvalidImageReference { image: String },
 }
 
 impl std::fmt::Display for ContainerfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContainerfileError::NotSupported { image } => {
-                write!(f, "base image '{image}' is not supported")
-            }
+            ContainerfileError::InvalidImageReference { image } => write!(
+                f,
+                "invalid image reference {image:?}: expected a nonempty reference without whitespace or control characters"
+            ),
         }
     }
 }
 
 impl std::error::Error for ContainerfileError {}
 
+/// Validate the reference before inserting it into a FROM instruction.
+/// The build engine validates the registry, repository, tag, and digest syntax.
+pub fn parse_image_reference(image: &str) -> Result<String, ContainerfileError> {
+    if image.is_empty() || image.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(ContainerfileError::InvalidImageReference {
+            image: image.to_string(),
+        });
+    }
+    Ok(image.to_string())
+}
+
 pub fn generate(
-    config: &Config,
+    from: &str,
     features: &[StagedFeature],
     copy_containerfile: bool,
 ) -> Result<String, ContainerfileError> {
-    let tag = &config.base_image.tag;
-    let base_image = match config.base_image.image.as_str() {
-        "fedora" => "registry.fedoraproject.org/fedora",
-        "ubi" => "registry.access.redhat.com/ubi10/ubi",
-        "hummingbird" => "registry.access.redhat.com/hi/core-runtime",
-        "ubuntu" => "docker.io/library/ubuntu",
-        image => {
-            return Err(ContainerfileError::NotSupported {
-                image: image.to_string(),
-            });
-        }
-    };
+    let image = parse_image_reference(from)?;
     Ok(format!(
-        "# System base\nFROM {base_image}:{tag} AS system\n\nUSER 0\n\n{}",
+        "# System base\nFROM {image} AS system\n\nUSER 0\n\n{}",
         final_stage(features, copy_containerfile)
     ))
 }
@@ -137,50 +137,8 @@ FROM system AS final
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BaseImageConfig, Config};
-
-    fn build_cf(config: &Config, features: &[StagedFeature]) -> Result<String, ContainerfileError> {
-        generate(config, features, false)
-    }
-
-    fn ubuntu_config(tag: &str) -> Config {
-        Config {
-            version: 1,
-            base_image: BaseImageConfig {
-                image: "ubuntu".to_string(),
-                tag: tag.to_string(),
-            },
-        }
-    }
-
-    fn fedora_config() -> Config {
-        Config {
-            version: 1,
-            base_image: BaseImageConfig {
-                image: "fedora".to_string(),
-                tag: "latest".to_string(),
-            },
-        }
-    }
-
-    fn ubi_config() -> Config {
-        Config {
-            version: 1,
-            base_image: BaseImageConfig {
-                image: "ubi".to_string(),
-                tag: "latest".to_string(),
-            },
-        }
-    }
-
-    fn hummingbird_config() -> Config {
-        Config {
-            version: 1,
-            base_image: BaseImageConfig {
-                image: "hummingbird".to_string(),
-                tag: "latest-builder".to_string(),
-            },
-        }
+    fn build_cf(from: &str, features: &[StagedFeature]) -> Result<String, ContainerfileError> {
+        generate(from, features, false)
     }
 
     fn mock_feature(id: &str, dir_name: &str) -> StagedFeature {
@@ -193,97 +151,17 @@ mod tests {
     }
 
     #[test]
-    fn ubuntu_generates_successfully() {
-        let config = ubuntu_config("noble-20251013");
-        assert!(build_cf(&config, &[]).is_ok());
-    }
-
-    #[test]
-    fn ubuntu_containerfile_contains_tag() {
-        let config = ubuntu_config("noble-20251013");
-        let content = build_cf(&config, &[]).unwrap();
-
-        assert!(content.contains("FROM docker.io/library/ubuntu:noble-20251013 AS system"));
-    }
-
-    #[test]
-    fn ubuntu_containerfile_tag_is_substituted() {
-        let content = build_cf(&ubuntu_config("24.04"), &[]).unwrap();
-
-        assert!(content.contains("FROM docker.io/library/ubuntu:24.04 AS system"));
-        assert!(!content.contains("{tag}"));
-    }
-
-    #[test]
-    fn fedora_generates_successfully() {
-        assert!(build_cf(&fedora_config(), &[]).is_ok());
-    }
-
-    #[test]
-    fn fedora_containerfile_contains_tag() {
-        let content = build_cf(&fedora_config(), &[]).unwrap();
-
-        assert!(content.contains("FROM registry.fedoraproject.org/fedora:latest AS system"));
-    }
-
-    #[test]
-    fn fedora_containerfile_tag_is_substituted() {
-        let content = build_cf(&fedora_config(), &[]).unwrap();
-
-        assert!(!content.contains("{tag}"));
-    }
-
-    #[test]
-    fn ubi_generates_successfully() {
-        assert!(build_cf(&ubi_config(), &[]).is_ok());
-    }
-
-    #[test]
-    fn ubi_containerfile_contains_tag() {
-        let content = build_cf(&ubi_config(), &[]).unwrap();
-
-        assert!(content.contains("FROM registry.access.redhat.com/ubi10/ubi:latest AS system"));
-    }
-
-    #[test]
-    fn ubi_containerfile_tag_is_substituted() {
-        let content = build_cf(&ubi_config(), &[]).unwrap();
-
-        assert!(!content.contains("{tag}"));
-    }
-
-    #[test]
-    fn hummingbird_generates_successfully() {
-        assert!(build_cf(&hummingbird_config(), &[]).is_ok());
-    }
-
-    #[test]
-    fn hummingbird_containerfile_contains_tag() {
-        let content = build_cf(&hummingbird_config(), &[]).unwrap();
-
-        assert!(
-            content.contains(
-                "FROM registry.access.redhat.com/hi/core-runtime:latest-builder AS system"
-            )
-        );
-    }
-
-    #[test]
-    fn hummingbird_containerfile_tag_is_substituted() {
-        let content = build_cf(&hummingbird_config(), &[]).unwrap();
-
-        assert!(!content.contains("{tag}"));
-    }
-
-    #[test]
-    fn base_images_do_not_install_system_tools() {
-        for config in [
-            ubuntu_config("24.04"),
-            fedora_config(),
-            ubi_config(),
-            hummingbird_config(),
+    fn arbitrary_image_references_are_preserved() {
+        for image in [
+            "alpine",
+            "docker.io/library/alpine:3.24",
+            "registry.fedoraproject.org/fedora:latest",
+            "localhost:5000/project/tools:dev",
+            "ghcr.io/example/project@sha256:0123456789abcdef",
+            "example/project:tag@sha256:0123456789abcdef",
         ] {
-            let content = build_cf(&config, &[]).unwrap();
+            let content = build_cf(image, &[]).unwrap();
+            assert!(content.contains(&format!("FROM {image} AS system\n")));
             assert!(
                 !content.contains("RUN "),
                 "unexpected build command: {content}"
@@ -292,35 +170,29 @@ mod tests {
     }
 
     #[test]
-    fn not_supported_error_message() {
-        let err = ContainerfileError::NotSupported {
-            image: "centos".to_string(),
-        };
-        assert_eq!(err.to_string(), "base image 'centos' is not supported");
+    fn invalid_references_cannot_change_containerfile_instructions() {
+        for image in [
+            "",
+            " ",
+            "alpine AS injected",
+            "alpine\nRUN touch /injected",
+            "alpine\r",
+            "alpine\t",
+            "alpine\0",
+        ] {
+            let err = build_cf(image, &[]).unwrap_err();
+            assert!(matches!(
+                err,
+                ContainerfileError::InvalidImageReference { .. }
+            ));
+            assert!(err.to_string().contains("invalid image reference"));
+        }
     }
 
-    #[test]
-    fn unknown_image_returns_not_supported() {
-        let config = Config {
-            version: 1,
-            base_image: BaseImageConfig {
-                image: "centos".to_string(),
-                tag: "latest".to_string(),
-            },
-        };
-        let err = build_cf(&config, &[]).unwrap_err();
-
-        assert_eq!(
-            err,
-            ContainerfileError::NotSupported {
-                image: "centos".to_string()
-            }
-        );
-    }
     #[test]
     fn feature_copy_instruction_present() {
         let feature = mock_feature("./tools/my-feature", "feature-0");
-        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
+        let content = build_cf("docker.io/library/ubuntu:24.04", &[feature]).unwrap();
 
         assert!(content.contains("COPY features/feature-0/"));
         assert!(content.contains("/tmp/feature-install/feature-0/install.sh"));
@@ -332,7 +204,7 @@ mod tests {
         feature
             .merged_options
             .insert("VERSION".to_string(), "1.0".to_string());
-        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
+        let content = build_cf("docker.io/library/ubuntu:24.04", &[feature]).unwrap();
 
         assert!(content.contains("VERSION=\"1.0\""));
     }
@@ -343,7 +215,7 @@ mod tests {
         feature
             .container_env
             .insert("CARGO_HOME".to_string(), "/home/sandbox/.cargo".to_string());
-        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
+        let content = build_cf("docker.io/library/ubuntu:24.04", &[feature]).unwrap();
 
         assert!(content.contains("ENV CARGO_HOME=\"/home/sandbox/.cargo\""));
     }
@@ -351,14 +223,14 @@ mod tests {
     #[test]
     fn feature_install_dir_cleaned_up() {
         let feature = mock_feature("./tools/my-feature", "feature-0");
-        let content = build_cf(&ubuntu_config("24.04"), &[feature]).unwrap();
+        let content = build_cf("docker.io/library/ubuntu:24.04", &[feature]).unwrap();
 
         assert!(content.contains("RUN rm -rf /tmp/feature-install\n"));
     }
 
     #[test]
     fn no_features_produces_same_output_as_before() {
-        let with_empty = build_cf(&ubuntu_config("24.04"), &[]).unwrap();
+        let with_empty = build_cf("docker.io/library/ubuntu:24.04", &[]).unwrap();
 
         assert!(!with_empty.contains("# Feature:"));
         assert!(!with_empty.contains("_REMOTE_USER"));
@@ -368,16 +240,16 @@ mod tests {
     #[test]
     fn copy_containerfile_is_supported_on_all_base_images() {
         for config in [
-            ubuntu_config("24.04"),
-            fedora_config(),
-            ubi_config(),
-            hummingbird_config(),
+            "docker.io/library/ubuntu:24.04",
+            "registry.fedoraproject.org/fedora:latest",
+            "docker.io/library/alpine:3.24",
+            "ghcr.io/example/project:dev",
         ] {
-            let content = generate(&config, &[], true).unwrap();
+            let content = generate(config, &[], true).unwrap();
             assert!(content.contains("COPY build-containerfile /tmp/build-containerfile"));
             assert!(content.contains("RUN cp /tmp/build-containerfile \"$HOME/Containerfile\""));
             assert!(!content.contains("--chown=sandbox"));
-            let without_copy = build_cf(&config, &[]).unwrap();
+            let without_copy = build_cf(config, &[]).unwrap();
             assert!(!without_copy.contains("build-containerfile"));
         }
     }
@@ -387,10 +259,10 @@ mod tests {
     #[test]
     fn host_ca_certificates_are_not_copied() {
         for content in [
-            build_cf(&ubuntu_config("24.04"), &[]).unwrap(),
-            build_cf(&fedora_config(), &[]).unwrap(),
-            build_cf(&ubi_config(), &[]).unwrap(),
-            build_cf(&hummingbird_config(), &[]).unwrap(),
+            build_cf("docker.io/library/ubuntu:24.04", &[]).unwrap(),
+            build_cf("registry.fedoraproject.org/fedora:latest", &[]).unwrap(),
+            build_cf("registry.access.redhat.com/ubi10/ubi:latest", &[]).unwrap(),
+            build_cf("docker.io/library/alpine:3.24", &[]).unwrap(),
         ] {
             assert!(
                 !content.contains("COPY certs/"),
