@@ -40,54 +40,11 @@ pub fn generate(
     copy_containerfile: bool,
 ) -> Result<String, ContainerfileError> {
     let tag = &config.base_image.tag;
-    let system_stage = match config.base_image.image.as_str() {
-        "fedora" => dnf_system_stage(
-            "registry.fedoraproject.org/fedora",
-            tag,
-            &[
-                "bind-utils",
-                "ca-certificates",
-                "curl",
-                "iproute",
-                "iptables",
-                "iputils",
-                "net-tools",
-                "nftables",
-                "nmap-ncat",
-                "openssh-server",
-                "procps-ng",
-                "traceroute",
-                "which",
-            ],
-        ),
-        "ubi" => dnf_system_stage(
-            "registry.access.redhat.com/ubi10/ubi",
-            tag,
-            &[
-                "bind-utils",
-                "ca-certificates",
-                "iputils",
-                "net-tools",
-                "nftables",
-                "nmap-ncat",
-                "openssh-server",
-                "procps-ng",
-                "which",
-            ],
-        ),
-        "hummingbird" => dnf_system_stage(
-            "registry.access.redhat.com/hi/core-runtime",
-            tag,
-            &[
-                "bind-utils",
-                "iproute",
-                "openssh-server",
-                "procps-ng",
-                "which",
-                "tar",
-            ],
-        ),
-        "ubuntu" => ubuntu_system_stage(tag),
+    let base_image = match config.base_image.image.as_str() {
+        "fedora" => "registry.fedoraproject.org/fedora",
+        "ubi" => "registry.access.redhat.com/ubi10/ubi",
+        "hummingbird" => "registry.access.redhat.com/hi/core-runtime",
+        "ubuntu" => "docker.io/library/ubuntu",
         image => {
             return Err(ContainerfileError::NotSupported {
                 image: image.to_string(),
@@ -95,7 +52,7 @@ pub fn generate(
         }
     };
     Ok(format!(
-        "{system_stage}\n{}",
+        "# System base\nFROM {base_image}:{tag} AS system\n\nUSER 0\n\n{}",
         final_stage(features, copy_containerfile)
     ))
 }
@@ -158,51 +115,6 @@ fn features_section(features: &[StagedFeature]) -> String {
     out.push_str("RUN rm -rf /tmp/feature-install\n");
     out.push('\n');
     out
-}
-
-fn ubuntu_system_stage(tag: &str) -> String {
-    format!(
-        r#"# System base
-FROM docker.io/library/ubuntu:{tag} AS system
-
-# Core system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        dnsutils \
-        iproute2 \
-        iptables \
-        nftables \
-        iputils-ping \
-        net-tools \
-        netcat-openbsd \
-        openssh-sftp-server \
-        procps \
-        traceroute \
-    && rm -rf /var/lib/apt/lists/*
-
-"#
-    )
-}
-
-fn dnf_system_stage(base_image: &str, tag: &str, packages: &[&str]) -> String {
-    let pkg_lines = packages
-        .iter()
-        .map(|p| format!("        {p} \\"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        r#"# System base
-FROM {base_image}:{tag} AS system
-
-# Core system dependencies
-USER 0
-RUN dnf install -y --setopt=install_weak_deps=False \
-{pkg_lines}
-    && dnf clean all
-
-"#
-    )
 }
 
 fn final_stage(features: &[StagedFeature], copy_containerfile: bool) -> String {
@@ -364,13 +276,19 @@ mod tests {
     }
 
     #[test]
-    fn hummingbird_containerfile_includes_iproute() {
-        let content = build_cf(&hummingbird_config(), &[]).unwrap();
-
-        assert!(
-            content.contains("iproute"),
-            "hummingbird image must install iproute for network namespace support"
-        );
+    fn base_images_do_not_install_system_tools() {
+        for config in [
+            ubuntu_config("24.04"),
+            fedora_config(),
+            ubi_config(),
+            hummingbird_config(),
+        ] {
+            let content = build_cf(&config, &[]).unwrap();
+            assert!(
+                !content.contains("RUN "),
+                "unexpected build command: {content}"
+            );
+        }
     }
 
     #[test]

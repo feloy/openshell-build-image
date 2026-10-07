@@ -248,15 +248,25 @@ fn hummingbird_image() -> &'static str {
 // Shared assertion helpers
 // ---------------------------------------------------------------------------
 
-fn check_packages(image: &str) {
-    for pkg in ["curl", "ip", "tar"] {
-        let out = run_in_image(image, &format!("which {pkg}"));
-        assert!(out.status.success(), "{pkg} not found in image");
-    }
+fn image_layers(image: &str) -> serde_json::Value {
+    let out = Command::new("podman")
+        .args([
+            "image",
+            "inspect",
+            "--format",
+            "{{json .RootFS.Layers}}",
+            image,
+        ])
+        .output()
+        .expect("podman image inspect should execute");
+    assert!(out.status.success(), "image inspection failed: {out:?}");
+    let layers: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(layers.is_array(), "expected image layers, got: {layers}");
+    layers
 }
 
 fn check_claude_in_path(image: &str, expected: bool) {
-    let out = run_in_image(image, "which claude");
+    let out = run_in_image(image, "command -v claude");
     if expected {
         assert!(out.status.success(), "claude not found in PATH");
     } else {
@@ -265,7 +275,7 @@ fn check_claude_in_path(image: &str, expected: bool) {
 }
 
 fn check_opencode_in_path(image: &str, expected: bool) {
-    let out = run_in_image(image, "which opencode");
+    let out = run_in_image(image, "command -v opencode");
     if expected {
         assert!(out.status.success(), "opencode not found in PATH");
     } else {
@@ -278,14 +288,14 @@ fn check_opencode_in_path(image: &str, expected: bool) {
 // ---------------------------------------------------------------------------
 
 macro_rules! image_tests {
-    ($mod_name:ident, $image_fn:ident) => {
+    ($mod_name:ident, $image_fn:ident, $base_image:literal) => {
         mod $mod_name {
             use super::*;
 
             #[test]
             #[ignore]
-            fn packages_installed() {
-                check_packages($image_fn());
+            fn base_image_layers_are_unchanged() {
+                assert_eq!(image_layers($image_fn()), image_layers($base_image));
             }
 
             #[test]
@@ -303,10 +313,22 @@ macro_rules! image_tests {
     };
 }
 
-image_tests!(ubuntu, ubuntu_image);
-image_tests!(fedora, fedora_image);
-image_tests!(ubi, ubi_image);
-image_tests!(hummingbird, hummingbird_image);
+image_tests!(ubuntu, ubuntu_image, "docker.io/library/ubuntu:24.04");
+image_tests!(
+    fedora,
+    fedora_image,
+    "registry.fedoraproject.org/fedora:latest"
+);
+image_tests!(
+    ubi,
+    ubi_image,
+    "registry.access.redhat.com/ubi10/ubi:latest"
+);
+image_tests!(
+    hummingbird,
+    hummingbird_image,
+    "registry.access.redhat.com/hi/core-runtime:latest-builder"
+);
 
 // ---------------------------------------------------------------------------
 // Workspace helpers for feature-based builds
@@ -599,14 +621,14 @@ macro_rules! feature_common_utils_tests {
             #[test]
             #[ignore]
             fn zsh_installed() {
-                let out = run_in_image($image_fn(), "which zsh");
+                let out = run_in_image($image_fn(), "command -v zsh");
                 assert!(out.status.success(), "zsh not found in image");
             }
 
             #[test]
             #[ignore]
             fn zsh_not_in_base_image() {
-                let out = run_in_image($base_image_fn(), "which zsh");
+                let out = run_in_image($base_image_fn(), "command -v zsh");
                 assert!(!out.status.success(), "zsh should not be in base image");
             }
         }
@@ -628,7 +650,7 @@ macro_rules! feature_node_tests {
             #[test]
             #[ignore]
             fn node_not_in_base_image() {
-                let out = run_in_image($base_image_fn(), "which node");
+                let out = run_in_image($base_image_fn(), "command -v node");
                 assert!(!out.status.success(), "node should not be in base image");
             }
 
@@ -642,7 +664,7 @@ macro_rules! feature_node_tests {
             #[test]
             #[ignore]
             fn npm_not_in_base_image() {
-                let out = run_in_image($base_image_fn(), "which npm");
+                let out = run_in_image($base_image_fn(), "command -v npm");
                 assert!(!out.status.success(), "npm should not be in base image");
             }
         }
@@ -664,28 +686,28 @@ macro_rules! feature_python_tests {
             #[test]
             #[ignore]
             fn flake8_installed() {
-                let out = run_in_image($image_fn(), "which flake8");
+                let out = run_in_image($image_fn(), "command -v flake8");
                 assert!(out.status.success(), "flake8 not found in PATH");
             }
 
             #[test]
             #[ignore]
             fn flake8_not_in_base_image() {
-                let out = run_in_image($base_image_fn(), "which flake8");
+                let out = run_in_image($base_image_fn(), "command -v flake8");
                 assert!(!out.status.success(), "flake8 should not be in base image");
             }
 
             #[test]
             #[ignore]
             fn pylint_installed() {
-                let out = run_in_image($image_fn(), "which pylint");
+                let out = run_in_image($image_fn(), "command -v pylint");
                 assert!(out.status.success(), "pylint not found in PATH");
             }
 
             #[test]
             #[ignore]
             fn pylint_not_in_base_image() {
-                let out = run_in_image($base_image_fn(), "which pylint");
+                let out = run_in_image($base_image_fn(), "command -v pylint");
                 assert!(!out.status.success(), "pylint should not be in base image");
             }
         }
@@ -768,7 +790,10 @@ mod without_workspace_config {
     fn oci_feature_not_installed() {
         // COMMON_UTILS_WORKSPACE declares common-utils which installs zsh.
         // Without --with-workspace-config the workspace file must be ignored.
-        let out = run_in_image(no_workspace_config_oci_feature_ubuntu_image(), "which zsh");
+        let out = run_in_image(
+            no_workspace_config_oci_feature_ubuntu_image(),
+            "command -v zsh",
+        );
         assert!(
             !out.status.success(),
             "zsh should not be installed when --with-workspace-config is absent"

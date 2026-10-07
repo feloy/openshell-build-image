@@ -6,7 +6,7 @@ OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/Op
 
 The tool assembles the image from a base image and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
-1. **Base image** — chosen via a config file, defaults to Ubuntu 24.04.
+1. **Base image** — chosen via a config file, defaults to Ubuntu 24.04. The builder uses the packages already present in the base image; it does not automatically install system tools.
 2. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
 
 Built-in agent installation and configuration have been removed. OCI addon support is tracked in [#178](https://github.com/openkaiden/openshell-build-image/issues/178).
