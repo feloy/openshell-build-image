@@ -15,7 +15,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod agent;
-mod certs;
 mod config;
 mod containerfile;
 mod feature;
@@ -141,20 +140,6 @@ struct Cli {
     #[arg(long, help = "Generate and include agent settings in the image")]
     with_agent_settings: bool,
     #[arg(
-        long = "ssl-certs",
-        value_name = "FILE",
-        conflicts_with = "disable_ssl_certs",
-        help = "Use a specific CA bundle instead of the auto-discovered one. \
-                The build fails immediately if the file does not exist."
-    )]
-    ssl_certs: Option<String>,
-    #[arg(
-        long = "disable-ssl-certs",
-        action = clap::ArgAction::SetTrue,
-        help = "Disable bundling CA certificates into the image."
-    )]
-    disable_ssl_certs: bool,
-    #[arg(
         long = "vm-rootfs",
         value_name = "DIR",
         help = "Root filesystem the build VM boots from (--runtime vm only). \
@@ -221,11 +206,6 @@ fn main() {
     };
     let backend = backend_for(&selected);
 
-    let ssl_certs = if cli.disable_ssl_certs {
-        None
-    } else {
-        Some(cli.ssl_certs.map(std::path::PathBuf::from))
-    };
     if let Err(e) = run(
         &cli.tag,
         cli.config,
@@ -236,7 +216,6 @@ fn main() {
         cli.model.as_deref(),
         cli.with_policy,
         cli.with_agent_settings,
-        ssl_certs,
         cli.copy_containerfile,
         &backend,
     ) {
@@ -418,7 +397,6 @@ fn run(
     model: Option<&str>,
     with_policy: bool,
     with_agent_settings: bool,
-    ssl_certs: Option<Option<PathBuf>>,
     copy_containerfile: bool,
     backend: &Backend,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -479,14 +457,6 @@ fn run(
         )?;
         std::fs::write(context_dir.path().join("policy.yaml"), policy_yaml)?;
     }
-    let ca_certs_copied = match ssl_certs {
-        None => false,
-        Some(None) => certs::copy_from_paths(context_dir.path(), certs::SYSTEM_CA_CERT_PATHS)?,
-        Some(Some(path)) => {
-            certs::copy_from_file(context_dir.path(), &path)?;
-            true
-        }
-    };
     let output = containerfile::generate(
         &config,
         agent.as_deref(),
@@ -495,7 +465,6 @@ fn run(
         &skill_names,
         &agent_env_vars,
         with_policy,
-        ca_certs_copied,
         copy_containerfile,
     )?;
     if copy_containerfile {
@@ -1256,6 +1225,7 @@ mod tests {
                 let file_index = args.iter().position(|arg| *arg == "-f").unwrap() + 1;
                 let used = std::fs::read_to_string(args[file_index])?;
                 let context = Path::new(args.last().unwrap());
+                assert!(!context.join("certs").exists());
                 let staged = context.join("build-containerfile");
                 assert_eq!(staged.exists(), self.0);
                 if self.0 {
@@ -1280,7 +1250,6 @@ mod tests {
                 None,
                 false,
                 false,
-                None,
                 enabled,
                 &Backend::Cli(&ContainerCli::Podman, &CopyChecker(enabled)),
             )
@@ -1303,7 +1272,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1323,7 +1291,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1343,7 +1310,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1363,7 +1329,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1389,7 +1354,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(1)),
         );
@@ -1409,7 +1373,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1435,7 +1398,6 @@ mod tests {
             Some("claude-opus-4-5"),
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1597,7 +1559,6 @@ mod tests {
             None,
             true,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1617,7 +1578,6 @@ mod tests {
             None,
             false,
             true,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1637,7 +1597,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
@@ -1790,72 +1749,8 @@ mod tests {
         assert_eq!(yaml_no_ws, yaml_ws);
     }
 
-    // ssl_certs / run() tests
-
     #[test]
-    fn run_with_ssl_certs_auto_discover_no_certs_found_succeeds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = run(
-            "test:latest",
-            Some(tmp.path().to_path_buf()),
-            false,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            Some(None),
-            false,
-            &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
-        );
-        assert!(result.is_ok(), "expected Ok, got {result:?}");
-    }
-
-    #[test]
-    fn run_with_ssl_certs_specific_file_succeeds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cert = tmp.path().join("bundle.crt");
-        std::fs::write(&cert, b"FAKE_CERT_DATA").unwrap();
-        let result = run(
-            "test:latest",
-            Some(tmp.path().to_path_buf()),
-            false,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            Some(Some(cert)),
-            false,
-            &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
-        );
-        assert!(result.is_ok(), "expected Ok, got {result:?}");
-    }
-
-    #[test]
-    fn run_with_ssl_certs_specific_file_missing_returns_error() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = run(
-            "test:latest",
-            Some(tmp.path().to_path_buf()),
-            false,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            Some(Some(PathBuf::from("/nonexistent/bundle.crt"))),
-            false,
-            &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn run_with_disable_ssl_certs_containerfile_has_no_cert_copy() {
+    fn run_does_not_bundle_host_certificates() {
         let tmp = tempfile::tempdir().unwrap();
         let capture = ContainerfileCapture(std::sync::Mutex::new(String::new()));
         run(
@@ -1868,7 +1763,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
         )
@@ -1876,7 +1770,7 @@ mod tests {
         let cf = capture.0.into_inner().unwrap();
         assert!(
             !cf.contains("COPY certs/"),
-            "Containerfile must not contain cert COPY when --disable-ssl-certs is passed"
+            "Containerfile must not copy host CA certificates"
         );
     }
 
@@ -2082,7 +1976,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Vm(&config, &runner, &output),
         );
@@ -2108,7 +2001,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             true,
             &Backend::Vm(&config, &runner, &tmp.path().join("out.tar")),
         )
@@ -2147,7 +2039,6 @@ mod tests {
             None,
             false,
             false,
-            None,
             false,
             &Backend::Vm(&config, &FailingVmRunner, &tmp.path().join("out.tar")),
         );
