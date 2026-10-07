@@ -1,0 +1,91 @@
+# Copyright (C) 2026 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: "install-openshell"
+description: "Download and checksum-verify selected OpenShell release binaries"
+inputs:
+  platform:
+    description: "Platform in the release manifest (linux-x86_64 or macos-arm64)"
+    default: ""
+  release-file:
+    description: "Release manifest path; defaults to the bundled release.json"
+    default: ""
+  version:
+    description: "Explicit release version without v; requires assets instead of platform"
+    default: ""
+  directory:
+    description: "Installation directory"
+    default: "${{ runner.temp }}/openshell-bin"
+  assets:
+    description: "Explicit asset/binary/SHA-256 lines; requires version instead of platform"
+    default: ""
+  checksum-command:
+    description: "Checksum verifier command and arguments"
+    default: "sha256sum --check"
+outputs:
+  version:
+    description: "Installed OpenShell release version"
+    value: "${{ steps.install.outputs.version }}"
+  directory:
+    description: "Installed binary directory"
+    value: "${{ steps.install.outputs.directory }}"
+runs:
+  using: "composite"
+  steps:
+    - id: "install"
+      shell: "bash"
+      env:
+        OPENSHELL_VERSION: "${{ inputs.version }}"
+        OPENSHELL_PLATFORM: "${{ inputs.platform }}"
+        RELEASE_MANIFEST: "${{ inputs.release-file }}"
+        ACTION_DIRECTORY: "${{ github.action_path }}"
+        INSTALL_DIRECTORY: "${{ inputs.directory }}"
+        OPENSHELL_ASSETS: "${{ inputs.assets }}"
+        CHECKSUM_COMMAND: "${{ inputs.checksum-command }}"
+      run: |
+        set -euo pipefail
+        if [ -n "$OPENSHELL_VERSION" ] || [ -n "$OPENSHELL_ASSETS" ]; then
+          test -n "$OPENSHELL_VERSION"
+          test -n "$OPENSHELL_ASSETS"
+          test -z "$OPENSHELL_PLATFORM"
+          test -z "$RELEASE_MANIFEST"
+        else
+          test -n "$OPENSHELL_PLATFORM"
+          manifest="${RELEASE_MANIFEST:-$ACTION_DIRECTORY/release.json}"
+          OPENSHELL_VERSION=$(jq -er '.version | select(type == "string" and length > 0)' "$manifest")
+          OPENSHELL_ASSETS=$(jq -er --arg platform "$OPENSHELL_PLATFORM" \
+            '.platforms[$platform] | select(type == "array" and length > 0) | .[] |
+             [.asset, .binary, .sha256] | @tsv' "$manifest")
+        fi
+        mkdir -p "$INSTALL_DIRECTORY"
+        read -r -a checksum_command <<< "$CHECKSUM_COMMAND"
+        while read -r asset binary digest extra; do
+          [ -n "$asset" ] || continue
+          test -n "$binary"
+          test -n "$digest"
+          test -z "${extra:-}"
+          archive="$INSTALL_DIRECTORY/$asset.tar.gz"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 180 \
+            "https://github.com/NVIDIA/OpenShell/releases/download/v$OPENSHELL_VERSION/$asset.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$digest" "$archive" | "${checksum_command[@]}"
+          test "$(tar -tzf "$archive")" = "$binary"
+          tar -xzf "$archive" -C "$INSTALL_DIRECTORY" "$binary"
+          chmod 755 "$INSTALL_DIRECTORY/$binary"
+          test "$("$INSTALL_DIRECTORY/$binary" --version | awk '{print $NF}')" = "$OPENSHELL_VERSION"
+        done <<< "$OPENSHELL_ASSETS"
+        echo "version=$OPENSHELL_VERSION" >> "$GITHUB_OUTPUT"
+        echo "directory=$INSTALL_DIRECTORY" >> "$GITHUB_OUTPUT"

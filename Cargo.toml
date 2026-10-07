@@ -59,3 +59,5 @@ zstd = "0.13"
 
 [dev-dependencies]
 ctor = "0.2"
+libc = "0.2"
+regex = "1"

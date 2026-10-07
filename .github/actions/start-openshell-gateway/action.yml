@@ -1,0 +1,94 @@
+# Copyright (C) 2026 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: "start-openshell-gateway"
+description: "Generate credentials, register the client and start an isolated gateway"
+inputs:
+  driver-settings:
+    description: "TOML driver settings file prepared by the caller"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - shell: "bash"
+      env:
+        DRIVER_SETTINGS_FILE: "${{ inputs.driver-settings }}"
+      run: |
+        set -euo pipefail
+        "$E2E_DIR/bin/openshell-gateway" generate-certs \
+          --output-dir "$E2E_DIR/pki" --server-san host.openshell.internal
+        mkdir -m 700 "$E2E_DIR/jwt"
+        openssl genpkey -algorithm Ed25519 -out "$E2E_DIR/jwt/signing.pem"
+        chmod 600 "$E2E_DIR/jwt/signing.pem"
+        openssl pkey -in "$E2E_DIR/jwt/signing.pem" -pubout -out "$E2E_DIR/jwt/public.pem"
+        echo "$E2E_NAME" > "$E2E_DIR/jwt/kid"
+        E2E_PORT=$((20000 + RANDOM))
+        while (exec 3<>"/dev/tcp/127.0.0.1/$E2E_PORT") 2> /dev/null; do
+          E2E_PORT=$((20000 + RANDOM))
+        done
+        cat > "$E2E_DIR/gateway.toml" <<EOF
+        [openshell]
+        version = 2
+        [openshell.gateway]
+        bind_address = "127.0.0.1:$E2E_PORT"
+        compute_driver = "$E2E_DRIVER"
+        guest_tls_ca = "$E2E_DIR/pki/ca.crt"
+        guest_tls_cert = "$E2E_DIR/pki/client/tls.crt"
+        guest_tls_key = "$E2E_DIR/pki/client/tls.key"
+        [openshell.gateway.tls]
+        cert_path = "$E2E_DIR/pki/server/tls.crt"
+        key_path = "$E2E_DIR/pki/server/tls.key"
+        client_ca_path = "$E2E_DIR/pki/ca.crt"
+        [openshell.gateway.mtls_auth]
+        enabled = true
+        [openshell.gateway.gateway_jwt]
+        signing_key_path = "$E2E_DIR/jwt/signing.pem"
+        public_key_path = "$E2E_DIR/jwt/public.pem"
+        kid_path = "$E2E_DIR/jwt/kid"
+        gateway_id = "$E2E_NAME"
+        [openshell.drivers.$E2E_DRIVER]
+        grpc_endpoint = "https://127.0.0.1:$E2E_PORT"
+        EOF
+        sed "s/__GATEWAY_PORT__/$E2E_PORT/g" "$DRIVER_SETTINGS_FILE" >> "$E2E_DIR/gateway.toml"
+        "$E2E_DIR/osenv" "$E2E_DIR/bin/openshell-gateway" config preflight \
+          --path "$E2E_DIR/gateway.toml" > "$E2E_ARTIFACTS/preflight.log" 2>&1
+        registration="$E2E_DIR/config/openshell/gateways/$E2E_NAME"
+        mkdir -p "$registration/mtls"
+        cp "$E2E_DIR/pki/ca.crt" "$registration/mtls/ca.crt"
+        cp "$E2E_DIR/pki/client/tls.crt" "$registration/mtls/tls.crt"
+        cp "$E2E_DIR/pki/client/tls.key" "$registration/mtls/tls.key"
+        cat > "$registration/metadata.json" <<EOF
+        {"name":"$E2E_NAME","gateway_endpoint":"https://127.0.0.1:$E2E_PORT","is_remote":false,"gateway_port":$E2E_PORT}
+        EOF
+        set -m
+        nohup "$E2E_DIR/osenv" "$E2E_DIR/bin/openshell-gateway" \
+          --config "$E2E_DIR/gateway.toml" --db-url "sqlite:$E2E_DIR/gateway.db?mode=rwc" \
+          < /dev/null > "$E2E_ARTIFACTS/gateway.log" 2>&1 &
+        echo "$!" > "$E2E_DIR/gateway.pid"
+        set +m
+        for attempt in {1..60}; do
+          if ! kill -0 "$(cat "$E2E_DIR/gateway.pid")"; then
+            echo "Gateway exited during startup; see $E2E_ARTIFACTS/gateway.log" >&2
+            exit 1
+          fi
+          if "$E2E_DIR/osenv" "$E2E_DIR/bin/openshell" status --output json \
+            > "$E2E_ARTIFACTS/status.json" 2> "$E2E_ARTIFACTS/status.log" \
+            && jq -e '.status == "connected"' "$E2E_ARTIFACTS/status.json"; then
+            break
+          fi
+          sleep 2
+        done
+        jq -e '.status == "connected"' "$E2E_ARTIFACTS/status.json"

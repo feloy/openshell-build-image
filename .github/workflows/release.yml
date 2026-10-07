@@ -27,7 +27,7 @@ jobs:
   # cannot happen on the macOS job that consumes it.
   build-rootfs:
     name: Build the VM rootfs
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -50,9 +50,9 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             use_cross: true
           - target: x86_64-apple-darwin
             runner: macos-26
@@ -209,7 +209,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
@@ -243,7 +243,7 @@ jobs:
 
   bump-next-version:
     name: Bump Next Version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: release
     permissions:
       contents: write

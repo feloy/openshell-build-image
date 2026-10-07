@@ -132,6 +132,75 @@ For a pinned image, use `--from registry.example.com/myproject@sha256:<digest>` 
 
 Base-image configuration files, `--config`, and `OPENSHELL_BUILD_IMAGE_CONFIG` are no longer used. `.kaiden/workspace.json` remains available through `--with-workspace-config`. Feature install scripts must support the selected image and have the tools they need available in it.
 
+## End-to-end tests with OpenShell
+
+The `OpenShell E2E` workflow builds an image with this tool, starts an isolated
+OpenShell **v0.1.2** gateway, and creates a sandbox from the result. It covers
+Podman on Linux x86_64 and the VM driver on a self-hosted Apple Silicon Mac.
+
+Each driver job uses an image matrix covering the digest-pinned Ubuntu-based
+`buildpack-deps:noble-curl` and Alpine-based `alpine/curl:8.22.0` images.
+Both include curl, a shell, and CA certificates and use no Dev Container Features.
+Each matrix job installs OpenShell and builds the image builder. Each image
+gets a fresh gateway, sandbox and policy state, with separate diagnostics under
+`target/e2e/<driver>/{ubuntu,alpine}`. The test checks
+the Containerfile copied into the produced image without starting a container.
+It creates a sandbox with an explicit non-root UID/GID of 10001 and checks the
+IDs and group memberships, then requires a failed curl to `https://example.com/` and a matching
+OpenShell policy-denial log. It approves
+that destination for curl, waits for the policy to load, and requires the same
+request to succeed. DNS, TLS, and timeout failures alone cannot pass the test.
+
+Setup and lifecycle commands live in named shell steps in
+[the E2E workflow](.github/workflows/e2e.yml) and its shared composite actions: install and verify OpenShell,
+build and inspect the image, generate certificates and keys, configure and start
+the gateway, register its client certificates, and create the sandbox. The macOS
+and Linux jobs select their own dependencies, release assets, builds, driver
+settings, and cleanup. They share granular actions for installation, gateway
+startup, sandbox creation, and common diagnostics and shutdown.
+The VM job keeps the `integration` approval environment on its self-hosted runner.
+E2E and VM Runtime also share [the rootfs build workflow](.github/workflows/build-vm-rootfs.yml).
+Diagnostics and cleanup run after each image even when an assertion fails.
+The matrix uses `fail-fast: false`, so a failure on one image does not cancel the
+other. VM variants run one at a time to limit resource use on the self-hosted Mac;
+matrix scheduling does not guarantee an image order. The required checks
+`Podman on Linux` and `VM on macOS` each require both image variants to pass.
+See [calling these workflows from another repository](.github/workflows/README.md)
+for inputs and a complete caller example.
+
+The Rust test connects to the already running sandbox. It checks the OpenShell
+version and driver, workload identity, blocked-request evidence, and the approved
+request. Ordinary `cargo test` runs its assertion guards and timeout test without
+starting OpenShell. After following the workflow's setup steps locally, export
+`E2E_DIR`, `E2E_NAME`, `E2E_DRIVER`, `E2E_ARTIFACTS`, and `E2E_VERSION` (the
+OpenShell release version installed during setup) and run:
+
+```sh
+cargo test --locked --test e2e_test network_policy -- --ignored --nocapture --test-threads=1
+```
+
+`E2E_DIR` is the private temporary directory created by the setup step. It contains
+the OpenShell binaries, client registration, and `osenv` wrapper that isolates
+OpenShell's configuration from the host. Run the workflow's diagnostic and
+cleanup shell steps when finished.
+
+For macOS, install the [VM build prerequisites](#requirements), plus `e2fsprogs`,
+`openssl@3`, and `jq`. The self-hosted runner uses labels `self-hosted`, `macos`,
+`arm64` and the existing `integration` environment with required reviewers. It
+must support Hypervisor.framework (`sysctl -n kern.hv_support` returns `1`).
+The workflow checks release archive SHA-256 digests and signs the VM driver with
+the hypervisor entitlement. The image builder is signed by `make build-vm`.
+
+`make build-vm` needs `vm-rootfs.tar` to embed the build root filesystem. Obtain
+it from the CI artifact or [build it on Linux arm64](#building-the-vms-root-filesystem).
+The workflow unpacks it into the run's temporary directory. The OpenShell VM
+driver has its own runtime embedded in the downloaded release; it is separate
+from the rootfs used by this image builder.
+
+Diagnostics are written to `target/e2e/<driver>` and uploaded by CI even on
+failure. Certificates and private keys remain outside that directory. Each run
+cleans up its sandbox, gateway, images, temporary files, and network.
+
 ## Logging
 
 Use `-v` (info) or `-vv` (debug) to increase log verbosity — useful for tracing feature staging and builds:
