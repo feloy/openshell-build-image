@@ -220,24 +220,39 @@ jobs:
       - name: Build and sign binary
         run: make build-vm
 
-      - name: Build an image in the VM
-        run: make run-vm TAG=openshell-vm-test:integration ARGS="-v --copy-containerfile"
-
-      - name: Verify the exported rootfs
+      - name: Build Fedora and Alpine images in the VM
         run: |
-          test -s ./target/openshell-vm-test-integration.tar
-          tar -tf ./target/openshell-vm-test-integration.tar > "$RUNNER_TEMP/vm-rootfs-contents.txt"
-          # Match the filename without assuming where the image sets HOME.
-          grep -Eq '(^|/)Containerfile$' "$RUNNER_TEMP/vm-rootfs-contents.txt"
+          for variant in fedora alpine; do
+            case "$variant" in
+              fedora) image=registry.fedoraproject.org/fedora:latest ;;
+              alpine) image=docker.io/library/alpine:3.24 ;;
+            esac
+            make run-vm FROM="$image" TAG="openshell-vm-test-$variant:integration" ARGS="-v --copy-containerfile"
+          done
+
+      - name: Verify the exported root filesystems
+        run: |
+          for variant in fedora alpine; do
+            archive="./target/openshell-vm-test-$variant-integration.tar"
+            test -s "$archive"
+            tar -tf "$archive" > "$RUNNER_TEMP/vm-rootfs-contents.txt"
+            # Match the filename without assuming where the image sets HOME.
+            containerfile=$(grep -E '(^|/)Containerfile$' "$RUNNER_TEMP/vm-rootfs-contents.txt")
+            test -n "$containerfile"
+            case "$variant" in
+              fedora) image=registry.fedoraproject.org/fedora:latest ;;
+              alpine) image=docker.io/library/alpine:3.24 ;;
+            esac
+            tar -xOf "$archive" "$containerfile" | grep -Fx "FROM $image AS system"
+          done
 
       # This runner is someone's own machine, and the exported rootfs is a few
       # hundred MB. Do not leave it lying around, even when the job fails.
       # That includes the build rootfs the binary unpacked for itself, which
       # nothing else on this machine will ever use again. Only that directory
-      # is removed, never the one above it, which is where a maintainer's own
-      # config.toml lives.
+      # is removed, never the application data directory above it.
       - name: Clean up
         if: always()
         run: |
-          rm -rf ./vm-rootfs.tar ./target/openshell-vm-test-integration.tar "$RUNNER_TEMP/vm-rootfs-contents.txt"
+          rm -rf ./vm-rootfs.tar ./target/openshell-vm-test-fedora-integration.tar ./target/openshell-vm-test-alpine-integration.tar "$RUNNER_TEMP/vm-rootfs-contents.txt"
           rm -rf "$HOME/Library/Application Support/openshell-build-image/vm-rootfs"

@@ -14,7 +14,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-mod config;
 mod containerfile;
 mod feature;
 mod vm_rootfs;
@@ -100,10 +99,11 @@ struct Cli {
     runtime: Runtime,
     #[arg(
         long,
-        env = "OPENSHELL_BUILD_IMAGE_CONFIG",
-        help = "Path to config directory (must contain config.toml)"
+        value_name = "IMAGE",
+        value_parser = containerfile::parse_image_reference,
+        help = "Project image to build from (name, tag, or digest)"
     )]
-    config: Option<PathBuf>,
+    from: String,
     #[arg(
         short = 'v',
         action = clap::ArgAction::Count,
@@ -186,7 +186,7 @@ fn main() {
 
     if let Err(e) = run(
         &cli.tag,
-        cli.config,
+        &cli.from,
         cli.with_workspace_config,
         cli.copy_containerfile,
         &backend,
@@ -360,12 +360,11 @@ fn build_summary(selected: &Selected) -> Option<String> {
 
 fn run(
     tag: &str,
-    config_path: Option<PathBuf>,
+    from: &str,
     with_workspace_config: bool,
     copy_containerfile: bool,
     backend: &Backend,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = config::load(config_path)?;
     let workspace = if with_workspace_config {
         workspace::load_from(Path::new("."))?
     } else {
@@ -375,7 +374,7 @@ fn run(
         .prefix("openshell-build-image")
         .tempdir()?;
     let features = feature::stage_all(workspace.as_ref(), context_dir.path())?;
-    let output = containerfile::generate(&config, &features, copy_containerfile)?;
+    let output = containerfile::generate(from, &features, copy_containerfile)?;
     if copy_containerfile {
         std::fs::write(context_dir.path().join("build-containerfile"), &output)?;
     }
@@ -493,7 +492,7 @@ mod tests {
 
     /// Parses `args` as a full command line, with the binary name prepended.
     fn parse_cli(args: &[&str]) -> Result<Cli, clap::Error> {
-        let mut argv = vec!["openshell-build-image"];
+        let mut argv = vec!["openshell-build-image", "--from", "alpine:3.24"];
         argv.extend_from_slice(args);
         Cli::try_parse_from(argv)
     }
@@ -505,11 +504,79 @@ mod tests {
     }
 
     #[test]
+    fn from_is_required() {
+        let err = Cli::try_parse_from(["test", "--runtime", "podman", "test:latest"])
+            .err()
+            .expect("missing --from should fail");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        assert!(err.to_string().contains("--from <IMAGE>"));
+    }
+
+    #[test]
+    fn from_accepts_project_images_for_every_runtime() {
+        for runtime in ["podman", "docker", "container", "vm"] {
+            let image = "localhost:5000/project/tools@sha256:0123456789abcdef";
+            let cli =
+                Cli::try_parse_from(["test", "--runtime", runtime, "--from", image, "test:latest"])
+                    .unwrap();
+            assert_eq!(cli.from, image);
+        }
+    }
+
+    #[test]
+    fn from_rejects_empty_and_multiline_values() {
+        for image in ["", "alpine AS injected", "alpine\nRUN touch /injected"] {
+            let err = Cli::try_parse_from([
+                "test",
+                "--runtime",
+                "podman",
+                "--from",
+                image,
+                "test:latest",
+            ])
+            .err()
+            .expect("invalid --from should fail");
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+    }
+
+    #[test]
+    fn run_passes_project_image_to_cli_backend() {
+        let capture = ContainerfileCapture(std::sync::Mutex::new(String::new()));
+        let image = "localhost:5000/project/tools:dev";
+        run(
+            "test:latest",
+            image,
+            false,
+            false,
+            &Backend::Cli(&ContainerCli::Podman, &capture),
+        )
+        .unwrap();
+        assert!(
+            capture
+                .0
+                .into_inner()
+                .unwrap()
+                .contains(&format!("FROM {image} AS system"))
+        );
+    }
+
+    #[test]
     fn copy_containerfile_flag_is_opt_in() {
-        let cli = Cli::try_parse_from(["test", "--runtime", "podman", "test:latest"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "test",
+            "--runtime",
+            "podman",
+            "--from",
+            "alpine:3.24",
+            "test:latest",
+        ])
+        .unwrap();
         assert!(!cli.copy_containerfile);
         let cli = Cli::try_parse_from([
             "test",
+            "--from",
+            "alpine:3.24",
             "--runtime",
             "podman",
             "--copy-containerfile",
@@ -543,10 +610,9 @@ mod tests {
         }
 
         for enabled in [false, true] {
-            let tmp = tempfile::tempdir().unwrap();
             run(
                 "test:latest",
-                Some(tmp.path().to_path_buf()),
+                "ghcr.io/example/project:dev",
                 false,
                 enabled,
                 &Backend::Cli(&ContainerCli::Podman, &CopyChecker(enabled)),
@@ -559,10 +625,9 @@ mod tests {
 
     #[test]
     fn run_with_base_image_succeeds() {
-        let tmp = tempfile::tempdir().unwrap();
         let result = run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
@@ -572,10 +637,9 @@ mod tests {
 
     #[test]
     fn run_returns_error_when_runner_fails() {
-        let tmp = tempfile::tempdir().unwrap();
         let result = run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(1)),
@@ -585,11 +649,10 @@ mod tests {
 
     #[test]
     fn run_does_not_bundle_host_certificates() {
-        let tmp = tempfile::tempdir().unwrap();
         let capture = ContainerfileCapture(std::sync::Mutex::new(String::new()));
         run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
@@ -796,7 +859,7 @@ mod tests {
         let output = tmp.path().join("test-latest.tar");
         let result = run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             false,
             &Backend::Vm(&config, &runner, &output),
@@ -815,7 +878,7 @@ mod tests {
         let runner = FakeVmRunner::new();
         run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             true,
             &Backend::Vm(&config, &runner, &tmp.path().join("out.tar")),
@@ -826,7 +889,10 @@ mod tests {
         // have been written into the context directory before the VM booted.
         let cf = runner.containerfile();
         assert!(cf.contains("RUN cp /tmp/build-containerfile \"$HOME/Containerfile\""));
-        assert!(cf.contains("FROM"), "unexpected Containerfile: {cf}");
+        assert!(
+            cf.contains("FROM ghcr.io/example/project:dev AS system"),
+            "unexpected Containerfile: {cf}"
+        );
     }
 
     #[test]
@@ -846,7 +912,7 @@ mod tests {
         let config = VmConfig::new(&fake_vm_rootfs(tmp.path()));
         let result = run(
             "test:latest",
-            Some(tmp.path().to_path_buf()),
+            "ghcr.io/example/project:dev",
             false,
             false,
             &Backend::Vm(&config, &FailingVmRunner, &tmp.path().join("out.tar")),
