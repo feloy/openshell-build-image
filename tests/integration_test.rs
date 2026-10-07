@@ -209,12 +209,9 @@ static UBI_IMAGE: OnceLock<String> = OnceLock::new();
 static HUMMINGBIRD_IMAGE: OnceLock<String> = OnceLock::new();
 static NO_WORKSPACE_CONFIG_OCI_FEATURE_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
 static NO_WORKSPACE_CONFIG_LOCAL_FEATURE_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
-static NO_WORKSPACE_CONFIG_NETWORK_HOSTS_UBUNTU_IMAGE: OnceLock<String> = OnceLock::new();
-static UBUNTU_NO_POLICY_IMAGE: OnceLock<String> = OnceLock::new();
 
 fn ubuntu_image() -> &'static str {
-    UBUNTU_IMAGE
-        .get_or_init(|| build_image("openshell-test-ubuntu:integration", &["--with-policy"]))
+    UBUNTU_IMAGE.get_or_init(|| build_image("openshell-test-ubuntu:integration", &[]))
 }
 
 fn fedora_image() -> &'static str {
@@ -222,7 +219,7 @@ fn fedora_image() -> &'static str {
         let config = fedora_config_dir();
         build_image(
             "openshell-test-fedora:integration",
-            &["--config", config.path().to_str().unwrap(), "--with-policy"],
+            &["--config", config.path().to_str().unwrap()],
         )
     })
 }
@@ -232,7 +229,7 @@ fn ubi_image() -> &'static str {
         let config = ubi_config_dir();
         build_image(
             "openshell-test-ubi:integration",
-            &["--config", config.path().to_str().unwrap(), "--with-policy"],
+            &["--config", config.path().to_str().unwrap()],
         )
     })
 }
@@ -242,7 +239,7 @@ fn hummingbird_image() -> &'static str {
         let config = hummingbird_config_dir();
         build_image(
             "openshell-test-hummingbird:integration",
-            &["--config", config.path().to_str().unwrap(), "--with-policy"],
+            &["--config", config.path().to_str().unwrap()],
         )
     })
 }
@@ -256,14 +253,6 @@ fn check_packages(image: &str) {
         let out = run_in_image(image, &format!("which {pkg}"));
         assert!(out.status.success(), "{pkg} not found in image");
     }
-}
-
-fn check_policy_yaml(image: &str) {
-    let out = run_in_image(image, "test -f /etc/openshell/policy.yaml");
-    assert!(
-        out.status.success(),
-        "policy.yaml not found in /etc/openshell/"
-    );
 }
 
 fn check_claude_in_path(image: &str, expected: bool) {
@@ -309,12 +298,6 @@ macro_rules! image_tests {
             #[ignore]
             fn opencode_is_not_installed() {
                 check_opencode_in_path($image_fn(), false);
-            }
-
-            #[test]
-            #[ignore]
-            fn policy_yaml_present() {
-                check_policy_yaml($image_fn());
             }
         }
     };
@@ -391,12 +374,6 @@ const PYTHON_WORKSPACE: &str = r#"{
             "version": "os-provided",
             "installTools": true
         }
-    }
-}"#;
-
-const NETWORK_HOSTS_WORKSPACE: &str = r#"{
-    "network": {
-        "hosts": ["example.com"]
     }
 }"#;
 
@@ -610,21 +587,6 @@ fn no_workspace_config_local_feature_ubuntu_image() -> &'static str {
     })
 }
 
-fn no_workspace_config_network_hosts_ubuntu_image() -> &'static str {
-    NO_WORKSPACE_CONFIG_NETWORK_HOSTS_UBUNTU_IMAGE.get_or_init(|| {
-        build_image_in_workspace_dir(
-            "openshell-test-no-workspace-config-network-hosts-ubuntu:integration",
-            NETWORK_HOSTS_WORKSPACE,
-            &["--with-policy"],
-        )
-    })
-}
-
-fn ubuntu_no_policy_image() -> &'static str {
-    UBUNTU_NO_POLICY_IMAGE
-        .get_or_init(|| build_image("openshell-test-ubuntu-no-policy:integration", &[]))
-}
-
 // ---------------------------------------------------------------------------
 // Feature integration tests — one macro per feature, instantiated per base image
 // ---------------------------------------------------------------------------
@@ -827,52 +789,6 @@ mod without_workspace_config {
             "local feature file should not exist when --with-workspace-config is absent"
         );
     }
-
-    #[test]
-    #[ignore]
-    fn network_hosts_not_in_policy() {
-        let out = run_in_image(
-            no_workspace_config_network_hosts_ubuntu_image(),
-            "cat /etc/openshell/policy.yaml",
-        );
-        assert!(out.status.success(), "failed to read policy.yaml");
-        let policy = String::from_utf8_lossy(&out.stdout);
-        assert!(
-            !policy.contains("name: workspace"),
-            "workspace network rule should not be present when --with-workspace-config is absent"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// --with-policy flag tests
-// ---------------------------------------------------------------------------
-
-mod with_policy {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn policy_yaml_present_when_flag_set() {
-        let out = run_in_image(ubuntu_image(), "test -f /etc/openshell/policy.yaml");
-        assert!(
-            out.status.success(),
-            "policy.yaml not found in /etc/openshell/ when --with-policy was passed"
-        );
-    }
-
-    #[test]
-    #[ignore]
-    fn policy_yaml_absent_without_flag() {
-        let out = run_in_image(
-            ubuntu_no_policy_image(),
-            "test ! -f /etc/openshell/policy.yaml",
-        );
-        assert!(
-            out.status.success(),
-            "policy.yaml found in /etc/openshell/ even though --with-policy was not passed"
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -934,8 +850,6 @@ fn cleanup_images() {
         "openshell-test-feature-local-ubi:integration",
         "openshell-test-no-workspace-config-oci-feature-ubuntu:integration",
         "openshell-test-no-workspace-config-local-feature-ubuntu:integration",
-        "openshell-test-no-workspace-config-network-hosts-ubuntu:integration",
-        "openshell-test-ubuntu-no-policy:integration",
     ] {
         Command::new("podman")
             .args(["rmi", "--force", tag])

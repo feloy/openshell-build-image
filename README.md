@@ -4,11 +4,10 @@
 
 OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-build-image` lets you build your own: lightweight, workspace-specific images that contain only what you need — without writing a Containerfile by hand.
 
-The tool assembles the image from a base image, an optional OpenShell network policy, and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
+The tool assembles the image from a base image and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
 1. **Base image** — chosen via a config file, defaults to Ubuntu 24.04.
-2. **OpenShell sandbox policy** (`--with-policy`) — includes base tooling rules and workspace hosts from `.kaiden/workspace.json` when `--with-workspace-config` is used.
-3. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
+2. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
 
 Built-in agent installation and configuration have been removed. OCI addon support is tracked in [#178](https://github.com/openkaiden/openshell-build-image/issues/178).
 
@@ -20,8 +19,6 @@ Built-in agent installation and configuration have been removed. OCI addon suppo
 | ----- | ----------- | ------- |
 | `features` | Dev Container Features to install in the image | [Dev Container Features](#dev-container-features) |
 | ~~`skills`~~ | ~~Skill directories~~ | ~~not used by the image builder~~ |
-| `network.hosts` | Hostnames (and optional ports) to allow through the sandbox network policy | [Workspace network rules](#workspace-network-rules) |
-| ~~`network.mode`~~ | ~~`allow` or `deny` — OpenShell always enforces deny mode; allow-all is not supported~~ | ~~not used by the image builder~~ |
 | ~~`environment`~~ | ~~Environment variables to inject into the workspace~~ | ~~not used by the image builder~~ |
 | ~~`mcp`~~ | ~~MCP server configuration (command-based and URL-based servers)~~ | ~~not used by the image builder~~ |
 | ~~`mounts`~~ | ~~Host directories to mount in the workspace~~ | ~~not used by the image builder~~ |
@@ -214,22 +211,6 @@ openshell-build-image --runtime podman -v myimage:latest
 
 OpenShell manages CA certificates for the sandbox. The image builder does not discover or copy the host's CA bundle into images.
 
-## Sandbox policy
-
-Pass `--with-policy` to include `/etc/openshell/policy.yaml` in the image. Without this flag, no policy file is written and the image contains no OpenShell policy. The policy file is read by the OpenShell runtime and defines the sandbox security policy for the container:
-
-- **Filesystem policy** — which paths are read-only, read-write, or inaccessible to processes in the sandbox.
-- **Network policies** — which binaries are allowed to connect to which hosts and ports.
-
-```sh
-openshell-build-image --runtime podman --with-policy myimage:latest
-```
-
-The policy merges two layers:
-
-1. **Base** ([`assets/policy.yaml`](assets/policy.yaml)) — general-purpose tooling: Git operations over HTTPS and the GitHub REST API via `gh`.
-2. **Workspace** (from `network.hosts` in `.kaiden/workspace.json` when `--with-workspace-config` is used) — user-defined hosts that binaries in `/bin`, `/usr/bin`, `/usr/local/bin`, and `/sandbox/.local/bin` may reach. See [Workspace network rules](#workspace-network-rules).
-
 ## Dev Container Features
 
 The tool supports [Dev Container Features](https://containers.dev/implementors/features/) declared in `.kaiden/workspace.json`. Pass `--with-workspace-config` to enable this; without it the file is not read and no features are installed.
@@ -295,56 +276,6 @@ When `--with-workspace-config` is passed, the tool reads `.kaiden/workspace.json
 
 Features run as root so install scripts can write to system paths.
 
-## Workspace network rules
-
-The OpenShell sandbox enforces a **deny-by-default** network policy: all outbound connections are blocked unless explicitly listed in the policy. There is no supported way to allow all hosts — the sandbox does not implement an allow-all mode. The `network.mode` field in `workspace.json` (which some orchestrators read to switch between `deny` and `allow`) is ignored by the image builder; the policy is always assembled in deny mode with explicit allow-rules.
-
-Use the `network.hosts` field in `.kaiden/workspace.json` to allow additional hosts — for example, package registries or internal APIs that your project's toolchain needs to reach. Pass `--with-workspace-config` to enable this; without it the file is not read and no workspace network rules are added.
-
-```json
-{
-  "network": {
-    "hosts": [
-      "index.crates.io",
-      "static.crates.io",
-      "static.rust-lang.org"
-    ]
-  }
-}
-```
-
-Each entry is a hostname, optionally followed by a port (`host:port`). When no port is given, port 443 is used.
-
-The builder merges a single `workspace` network policy rule into `policy.yaml` that covers all listed hosts. The rule authorises the following binaries to connect to those hosts:
-
-| Binary glob | Covers |
-|---|---|
-| `/bin/**` | Core system utilities |
-| `/usr/bin/**` | Standard system binaries (e.g. `curl`) |
-| `/usr/local/bin/**` | Locally installed tools |
-| `/sandbox/.local/bin/**` | User-local binaries |
-
-An invalid or unparseable host entry (e.g. a bare space or malformed URL) causes the build to fail immediately with a descriptive error message.
-
-### Example — Rust project with crates.io access
-
-```json
-{
-  "features": {
-    "ghcr.io/devcontainers/features/rust:1": {}
-  },
-  "network": {
-    "hosts": [
-      "index.crates.io",
-      "static.crates.io",
-      "static.rust-lang.org"
-    ]
-  }
-}
-```
-
-With this configuration, `cargo build` and `cargo fetch` inside the sandbox can download crate metadata and source tarballs.
-
 ## Saving the Containerfile
 
 Pass `--copy-containerfile` to include the exact Containerfile used for the build at `$HOME/Containerfile` **inside the image**, using the home directory and user inherited from the base image.
@@ -365,9 +296,8 @@ openshell-build-image [OPTIONS] <TAG>
 | `<TAG>`                        | Tag for the built image (e.g. `myimage:latest`)                    |
 | `--runtime <RUNTIME>`          | Backend to build the image with (`podman`, `docker`, `container`, `vm` — see [Building in a VM](#building-in-a-vm---runtime-vm)) |
 | `--config <CONFIG>`            | Path to config directory containing `config.toml` (env: `OPENSHELL_BUILD_IMAGE_CONFIG`) |
-| `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features and network rules |
+| `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features |
 | `--copy-containerfile`         | Copy the build Containerfile to `$HOME/Containerfile` inside the image |
-| `--with-policy`                | Include OpenShell sandbox policy (`/etc/openshell/policy.yaml`) in the image   |
 | `--vm-rootfs <DIR>`            | Root filesystem the build VM boots from (`--runtime vm` only). Defaults to the one embedded in the binary. |
 | `--vm-output <FILE>`           | Path for the rootfs tarball produced by `--runtime vm`. Defaults to a name derived from `<TAG>` in the current directory. |
 | `--vm-cpus <N>`                | vCPUs given to the build VM (`--runtime vm` only). Default `2`.     |
@@ -377,13 +307,12 @@ openshell-build-image [OPTIONS] <TAG>
 
 The five `--vm-*` options are rejected with any other `--runtime`, rather than silently ignored.
 
-## Example — project toolchains and network access
+## Example — project toolchains
 
-With Dev Container Features and `network.hosts` declared in `.kaiden/workspace.json`, build the image and include its policy:
+With Dev Container Features declared in `.kaiden/workspace.json`, build the image:
 
 ```sh
 openshell-build-image --runtime podman \
   --with-workspace-config \
-  --with-policy \
   myproject:latest
 ```
