@@ -1,0 +1,35 @@
+{
+  "_license": "Copyright (C) 2026 Red Hat, Inc. SPDX-License-Identifier: Apache-2.0",
+  "version": "0.1.2",
+  "platforms": {
+    "linux-x86_64": [
+      {
+        "asset": "openshell-x86_64-unknown-linux-musl",
+        "binary": "openshell",
+        "sha256": "7eb6917285331a09e3300266a0558616481a5e9927cae2612ea07c4045b6dd6f"
+      },
+      {
+        "asset": "openshell-gateway-x86_64-unknown-linux-gnu",
+        "binary": "openshell-gateway",
+        "sha256": "218d887845b3a020ab7535c9985eb9c666d6938f144044957f8b82b42892aadb"
+      }
+    ],
+    "macos-arm64": [
+      {
+        "asset": "openshell-aarch64-apple-darwin",
+        "binary": "openshell",
+        "sha256": "cdde7e92bd7eac664031cf171cfe80d29e7f122a6674917b25a4ce0bcbc33466"
+      },
+      {
+        "asset": "openshell-gateway-aarch64-apple-darwin",
+        "binary": "openshell-gateway",
+        "sha256": "640068efa16e446d5f4f9ffaec0af769dbab04d686473d2a7bd6bafeb4ef7f45"
+      },
+      {
+        "asset": "openshell-driver-vm-aarch64-apple-darwin",
+        "binary": "openshell-driver-vm",
+        "sha256": "01de38811a2c74e8a61c7b275067fc616f5dcc63b73e3b75d92f3c99d852016a"
+      }
+    ]
+  }
+}

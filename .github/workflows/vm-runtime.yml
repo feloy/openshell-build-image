@@ -134,33 +134,14 @@ jobs:
       - name: Build, sign, and check the entitlement
         run: make build-vm
 
-  # The VM boots from a Linux rootfs with buildah installed. Building it needs
-  # podman on native arm64, which the macOS runners do not have.
+  # Shared with OpenShell E2E; each workflow receives its own rootfs artifact.
   build-rootfs:
     name: Build the VM rootfs
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # No job here runs an authenticated git command, and the
-          # self-hosted runner would otherwise keep the token in the
-          # checkout it just filled with pull-request code.
-          persist-credentials: false
-
-      - name: Install podman
-        run: sudo apt-get update && sudo apt-get install -y podman
-
-      # The tarball is what the release binary embeds, and it doubles as the
-      # artifact format: upload-artifact zips its input, which drops symlinks
-      # and the executable bit — both of which a bootable rootfs needs.
-      - name: Build VM rootfs
-        run: make build-vm-rootfs
-
-      - name: Upload rootfs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: vm-rootfs
-          path: vm-rootfs.tar
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-vm-rootfs.yml
+    with:
+      runner-labels: '["ubuntu-26.04-arm"]'
 
   # The only job that actually boots a VM, so the only one needing bare metal.
   integration:
