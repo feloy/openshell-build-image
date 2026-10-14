@@ -1,34 +1,34 @@
 {
   "_license": "Copyright (C) 2026 Red Hat, Inc. SPDX-License-Identifier: Apache-2.0",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "platforms": {
     "linux-x86_64": [
       {
         "asset": "openshell-x86_64-unknown-linux-musl",
         "binary": "openshell",
-        "sha256": "7eb6917285331a09e3300266a0558616481a5e9927cae2612ea07c4045b6dd6f"
+        "sha256": "ed08ea7874c47f22d6e5dcc4b27d9ef1ef5d2060f83035b35ff725d5160830a3"
       },
       {
         "asset": "openshell-gateway-x86_64-unknown-linux-gnu",
         "binary": "openshell-gateway",
-        "sha256": "218d887845b3a020ab7535c9985eb9c666d6938f144044957f8b82b42892aadb"
+        "sha256": "da8dce943fe01cce90243b2bf2587c71a243e4d641a4b616528829b681ced198"
       }
     ],
     "macos-arm64": [
       {
         "asset": "openshell-aarch64-apple-darwin",
         "binary": "openshell",
-        "sha256": "cdde7e92bd7eac664031cf171cfe80d29e7f122a6674917b25a4ce0bcbc33466"
+        "sha256": "2eda3676aa85ff60551b403847090942e119c89f37c84d1635ac166c6b879826"
       },
       {
         "asset": "openshell-gateway-aarch64-apple-darwin",
         "binary": "openshell-gateway",
-        "sha256": "640068efa16e446d5f4f9ffaec0af769dbab04d686473d2a7bd6bafeb4ef7f45"
+        "sha256": "a0cff0699f4a608a644805dbbf898c42caa59856274ff3cc2cdd6b3af4bacabe"
       },
       {
         "asset": "openshell-driver-vm-aarch64-apple-darwin",
         "binary": "openshell-driver-vm",
-        "sha256": "01de38811a2c74e8a61c7b275067fc616f5dcc63b73e3b75d92f3c99d852016a"
+        "sha256": "56e321f990741ca5585f5229e37c178f541b0c38029351fe59b72a36c1c750d4"
       }
     ]
   }

@@ -46,8 +46,6 @@ runs:
         bind_address = "127.0.0.1:$E2E_PORT"
         compute_driver = "$E2E_DRIVER"
         guest_tls_ca = "$E2E_DIR/pki/ca.crt"
-        guest_tls_cert = "$E2E_DIR/pki/client/tls.crt"
-        guest_tls_key = "$E2E_DIR/pki/client/tls.key"
         [openshell.gateway.tls]
         cert_path = "$E2E_DIR/pki/server/tls.crt"
         key_path = "$E2E_DIR/pki/server/tls.key"

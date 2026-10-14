@@ -48,7 +48,7 @@ The explicit sandbox `/bin/sh` command overrides the inherited `/entrypoint.sh`.
 `/usr/bin/curl` matches the existing policy and denial-log assertions.
 
 The curl project's `curlimages/curl:8.22.0` was also evaluated. Its ARM64 image
-contains a root-only `/etc/resolv.conf` (mode 0700). OpenShell v0.1.2's VM init
+contains a root-only `/etc/resolv.conf` (mode 0700). OpenShell's VM init
 rewrites the resolver contents while preserving the existing file mode, so UID
 10001 cannot read it and DNS fails before any network-policy assertion. The
 selected `alpine/curl` image avoids that incompatibility.
