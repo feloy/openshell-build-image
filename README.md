@@ -118,7 +118,7 @@ Base-image configuration files, `--config`, `OPENSHELL_BUILD_IMAGE_CONFIG`, and 
 ## End-to-end tests with OpenShell
 
 The `OpenShell E2E` workflow builds an image with this tool, starts an isolated
-OpenShell **v0.1.3** gateway, and creates a sandbox from the result. It covers
+OpenShell **v0.1.4** gateway, and creates a sandbox from the result. It covers
 Podman on Linux x86_64 and the VM driver on a self-hosted Apple Silicon Mac.
 
 Each driver job uses an image matrix covering the digest-pinned Ubuntu-based
