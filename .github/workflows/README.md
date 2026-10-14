@@ -24,7 +24,6 @@ digest-pinned `image` reference passed directly to the builder through
 `E2E_BASE_IMAGE`. The Alpine entry selects `docker.io/alpine/curl:8.22.0`. It includes
 Linux AMD64 and ARM64 variants, Alpine, `/bin/sh`, `/bin/sleep`, `/usr/bin/curl`,
 and CA certificates under `/etc`.
-These prerequisites require no Dev Container Features.
 Each driver job uses an Ubuntu/Alpine matrix with `fail-fast: false`, so both
 variants run even if one fails. Each variant installs OpenShell, builds the image
 builder and gets a fresh gateway, sandbox, policy state and temporary directory.
