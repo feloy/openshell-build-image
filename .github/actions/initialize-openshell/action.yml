@@ -37,7 +37,7 @@ runs:
       run: |
         set -euo pipefail
         E2E_DIR=$(mktemp -d "/tmp/osbi-e2e-${E2E_DRIVER}-XXXXXX")
-        # Podman sandbox names in v0.1.2 are limited to 19 characters.
+        # Keep Podman sandbox names within the 19-character limit.
         E2E_NAME=$(printf 'e2e-%s-%s' "$E2E_DRIVER" "${E2E_DIR##*-}" | tr '[:upper:]' '[:lower:]')
         E2E_IMAGE="localhost/$E2E_NAME:e2e"
         mkdir -p "$E2E_DIR/bin" "$E2E_ARTIFACTS"

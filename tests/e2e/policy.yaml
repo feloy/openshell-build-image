@@ -16,7 +16,7 @@
 
 version: 1
 # Use a dedicated non-root identity without image-account supplementary groups.
-# OpenShell v0.1.2 clears those groups during rootless Podman startup.
+# Rootless Podman startup clears those supplementary groups.
 process:
   run_as_user: "10001"
   run_as_group: "10001"
