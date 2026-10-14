@@ -2,28 +2,11 @@
 
 [OpenShell](https://github.com/NVIDIA/OpenShell-Community) is NVIDIA's runtime environment for autonomous AI agents. It provides isolated sandboxes where agents can safely run and iterate — without risk to the host system or your credentials.
 
-OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-build-image` lets you build your own: lightweight, workspace-specific images that contain only what you need — without writing a Containerfile by hand.
+OpenShell ships a set of [pre-built sandbox images](https://github.com/NVIDIA/OpenShell-Community), but they are general-purpose. `openshell-build-image` builds from an image prepared for your project without requiring you to write a Containerfile by hand.
 
-The tool assembles the image from a base image and project-specific toolchains. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
-
-1. **Project image** — supplied with the required `--from` flag, with the tools your project needs already installed. The builder uses the packages already present in this image; it does not automatically install system tools.
-2. **Project-specific toolchains** — toolchains and utilities declared as Dev Container Features in `.kaiden/workspace.json` are installed when `--with-workspace-config` is used.
+The tool builds on a project image that already has the tools your project needs. Use `--runtime` to select what drives the build: a container CLI on the host (`podman`, `docker`, or the macOS `container` CLI), or a microVM (`vm`) that needs no container runtime installed at all — see [Building in a VM](#building-in-a-vm---runtime-vm).
 
 Built-in agent installation and configuration have been removed. OCI addon support is tracked in [#178](https://github.com/openkaiden/openshell-build-image/issues/178).
-
-### workspace.json fields
-
-`.kaiden/workspace.json` is the per-workspace configuration file, read when `--with-workspace-config` is passed. The following fields are supported:
-
-| Field | Description | Details |
-| ----- | ----------- | ------- |
-| `features` | Dev Container Features to install in the image | [Dev Container Features](#dev-container-features) |
-| ~~`skills`~~ | ~~Skill directories~~ | ~~not used by the image builder~~ |
-| ~~`environment`~~ | ~~Environment variables to inject into the workspace~~ | ~~not used by the image builder~~ |
-| ~~`mcp`~~ | ~~MCP server configuration (command-based and URL-based servers)~~ | ~~not used by the image builder~~ |
-| ~~`mounts`~~ | ~~Host directories to mount in the workspace~~ | ~~not used by the image builder~~ |
-| ~~`ports`~~ | ~~TCP ports to expose from the workspace~~ | ~~not used by the image builder~~ |
-| ~~`secrets`~~ | ~~Secret names to inject into the workspace~~ | ~~not used by the image builder~~ |
 
 ## Quick start
 
@@ -130,7 +113,7 @@ openshell-build-image --runtime podman --from docker.io/library/alpine:3.24 alpi
 
 For a pinned image, use `--from registry.example.com/myproject@sha256:<digest>` with its full digest. The VM backend pulls the image into its own Buildah store, so it needs a registry reference accessible from the VM rather than an image present only in the host's store.
 
-Base-image configuration files, `--config`, and `OPENSHELL_BUILD_IMAGE_CONFIG` are no longer used. `.kaiden/workspace.json` remains available through `--with-workspace-config`. Feature install scripts must support the selected image and have the tools they need available in it.
+Base-image configuration files, `--config`, `OPENSHELL_BUILD_IMAGE_CONFIG`, and `.kaiden/workspace.json` are not used by the image builder. Supply the required tools in the image passed to `--from`.
 
 ## End-to-end tests with OpenShell
 
@@ -140,7 +123,7 @@ Podman on Linux x86_64 and the VM driver on a self-hosted Apple Silicon Mac.
 
 Each driver job uses an image matrix covering the digest-pinned Ubuntu-based
 `buildpack-deps:noble-curl` and Alpine-based `alpine/curl:8.22.0` images.
-Both include curl, a shell, and CA certificates and use no Dev Container Features.
+Both include curl, a shell, and CA certificates.
 Each matrix job installs OpenShell and builds the image builder. Each image
 gets a fresh gateway, sandbox and policy state, with separate diagnostics under
 `target/e2e/<driver>/{ubuntu,alpine}`. The test checks
@@ -203,78 +186,13 @@ cleans up its sandbox, gateway, images, temporary files, and network.
 
 ## Logging
 
-Use `-v` (info) or `-vv` (debug) to increase log verbosity — useful for tracing feature staging and builds:
+Use `-v` (info) or `-vv` (debug) to increase log verbosity during builds:
 
 ```sh
 openshell-build-image --runtime podman --from myproject:dev -v myimage:latest
 ```
 
 OpenShell manages CA certificates for the sandbox. The image builder does not discover or copy the host's CA bundle into images.
-
-## Dev Container Features
-
-The tool supports [Dev Container Features](https://containers.dev/implementors/features/) declared in `.kaiden/workspace.json`. Pass `--with-workspace-config` to enable this; without it the file is not read and no features are installed.
-
-### workspace.json schema
-
-```json
-{
-  "features": {
-    "<feature-ref>": {
-      "<option>": "<value>"
-    }
-  }
-}
-```
-
-Each key in `features` is a feature reference; each value is a map of options passed to the feature's `install.sh`.
-
-### Feature references
-
-| Format                 | Example                                  | Resolves to              |
-| ---------------------- | ---------------------------------------- | ------------------------ |
-| OCI registry reference | `ghcr.io/devcontainers/features/rust:1`  | downloaded from registry |
-| Local path             | `./my-feature`                           | `.kaiden/my-feature/`    |
-
-Local paths are resolved relative to `.kaiden/`: `./my-feature` points to `.kaiden/my-feature/`.
-
-OCI references without an explicit registry default to `ghcr.io`. Tags and digests (`@sha256:…`) are both supported. Direct `http://` / `https://` tarball URLs are not supported.
-
-### Example
-
-```json
-{
-  "features": {
-    "ghcr.io/devcontainers/features/rust:1": {
-      "version": "stable",
-      "profile": "minimal"
-    },
-    "./my-feature": {}
-  }
-}
-```
-
-With the above, `./my-feature` refers to a local feature at `.kaiden/my-feature/`.
-
-### Installation order
-
-Features are installed in the order defined by each feature's `installsAfter` field in its `devcontainer-feature.json`. Within the same dependency level, features are processed in alphabetical order by reference.
-
-### How it works
-
-When `--with-workspace-config` is passed, the tool reads `.kaiden/workspace.json` and:
-
-1. Downloads and extracts each OCI feature into a temporary build context directory (`/tmp/openshell-build-image…`).
-2. Copies local feature directories into the same build context.
-3. Passes the build context to `podman build`, where each feature is installed via:
-   ```dockerfile
-   COPY features/<dir>/ /tmp/feature-install/<dir>/
-   RUN chmod +x /tmp/feature-install/<dir>/install.sh && \
-       OPTION="value" /tmp/feature-install/<dir>/install.sh
-   ```
-4. Cleans up all feature files from the image with `RUN rm -rf /tmp/feature-install` after all features are installed.
-
-Features run as root so install scripts can write to system paths.
 
 ## Saving the Containerfile
 
@@ -296,7 +214,6 @@ openshell-build-image --runtime <RUNTIME> --from <IMAGE> [OPTIONS] <TAG>
 | `<TAG>`                        | Tag for the built image (e.g. `myimage:latest`)                    |
 | `--runtime <RUNTIME>`          | Backend to build the image with (`podman`, `docker`, `container`, `vm` — see [Building in a VM](#building-in-a-vm---runtime-vm)) |
 | `--from <IMAGE>`               | Required project image to build from (name, tag, or digest) |
-| `--with-workspace-config`      | Read `.kaiden/workspace.json` and apply its features |
 | `--copy-containerfile`         | Copy the build Containerfile to `$HOME/Containerfile` inside the image |
 | `--vm-rootfs <DIR>`            | Root filesystem the build VM boots from (`--runtime vm` only). Defaults to the one embedded in the binary. |
 | `--vm-output <FILE>`           | Path for the rootfs tarball produced by `--runtime vm`. Defaults to a name derived from `<TAG>` in the current directory. |
@@ -306,14 +223,3 @@ openshell-build-image --runtime <RUNTIME> --from <IMAGE> [OPTIONS] <TAG>
 | `-v` / `-vv`                   | Increase log verbosity (info / debug)                              |
 
 The five `--vm-*` options are rejected with any other `--runtime`, rather than silently ignored.
-
-## Example — project toolchains
-
-With Dev Container Features declared in `.kaiden/workspace.json`, build the image:
-
-```sh
-openshell-build-image --runtime podman \
-  --from myproject:dev \
-  --with-workspace-config \
-  myproject:latest
-```

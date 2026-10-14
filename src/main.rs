@@ -15,9 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod containerfile;
-mod feature;
 mod vm_rootfs;
-mod workspace;
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -110,8 +108,6 @@ struct Cli {
         help = "Increase log verbosity (-v info, -vv debug)"
     )]
     verbose: u8,
-    #[arg(long, help = "Read .kaiden/workspace.json and apply its features")]
-    with_workspace_config: bool,
     #[arg(
         long,
         help = "Copy the build Containerfile to $HOME/Containerfile inside the image"
@@ -184,13 +180,7 @@ fn main() {
     };
     let backend = backend_for(&selected);
 
-    if let Err(e) = run(
-        &cli.tag,
-        &cli.from,
-        cli.with_workspace_config,
-        cli.copy_containerfile,
-        &backend,
-    ) {
+    if let Err(e) = run(&cli.tag, &cli.from, cli.copy_containerfile, &backend) {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
@@ -361,20 +351,13 @@ fn build_summary(selected: &Selected) -> Option<String> {
 fn run(
     tag: &str,
     from: &str,
-    with_workspace_config: bool,
     copy_containerfile: bool,
     backend: &Backend,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace = if with_workspace_config {
-        workspace::load_from(Path::new("."))?
-    } else {
-        None
-    };
     let context_dir = tempfile::Builder::new()
         .prefix("openshell-build-image")
         .tempdir()?;
-    let features = feature::stage_all(workspace.as_ref(), context_dir.path())?;
-    let output = containerfile::generate(from, &features, copy_containerfile)?;
+    let output = containerfile::generate(from, copy_containerfile)?;
     if copy_containerfile {
         std::fs::write(context_dir.path().join("build-containerfile"), &output)?;
     }
@@ -548,7 +531,6 @@ mod tests {
             "test:latest",
             image,
             false,
-            false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
         )
         .unwrap();
@@ -613,7 +595,6 @@ mod tests {
             run(
                 "test:latest",
                 "ghcr.io/example/project:dev",
-                false,
                 enabled,
                 &Backend::Cli(&ContainerCli::Podman, &CopyChecker(enabled)),
             )
@@ -629,7 +610,6 @@ mod tests {
             "test:latest",
             "ghcr.io/example/project:dev",
             false,
-            false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(0)),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -640,7 +620,6 @@ mod tests {
         let result = run(
             "test:latest",
             "ghcr.io/example/project:dev",
-            false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &FakeRunner(1)),
         );
@@ -653,7 +632,6 @@ mod tests {
         run(
             "test:latest",
             "ghcr.io/example/project:dev",
-            false,
             false,
             &Backend::Cli(&ContainerCli::Podman, &capture),
         )
@@ -861,7 +839,6 @@ mod tests {
             "test:latest",
             "ghcr.io/example/project:dev",
             false,
-            false,
             &Backend::Vm(&config, &runner, &output),
         );
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -879,7 +856,6 @@ mod tests {
         run(
             "test:latest",
             "ghcr.io/example/project:dev",
-            false,
             true,
             &Backend::Vm(&config, &runner, &tmp.path().join("out.tar")),
         )
@@ -913,7 +889,6 @@ mod tests {
         let result = run(
             "test:latest",
             "ghcr.io/example/project:dev",
-            false,
             false,
             &Backend::Vm(&config, &FailingVmRunner, &tmp.path().join("out.tar")),
         );
