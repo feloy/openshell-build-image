@@ -119,7 +119,9 @@ Base-image configuration files, `--config`, `OPENSHELL_BUILD_IMAGE_CONFIG`, and 
 
 The `OpenShell E2E` workflow builds an image with this tool, starts an isolated
 OpenShell **v0.1.4** gateway, and creates a sandbox from the result. It covers
-Podman on Linux x86_64 and the VM driver on a self-hosted Apple Silicon Mac.
+Podman and Docker on Linux x86_64 and the VM driver on a self-hosted Apple
+Silicon Mac. Each Linux job builds and launches the image through the same
+container engine.
 
 Each driver job uses an image matrix covering the digest-pinned Ubuntu-based
 `buildpack-deps:noble-curl` and Alpine-based `alpine/curl:8.22.0` images.
@@ -146,8 +148,9 @@ E2E and VM Runtime also share [the rootfs build workflow](.github/workflows/buil
 Diagnostics and cleanup run after each image even when an assertion fails.
 The matrix uses `fail-fast: false`, so a failure on one image does not cancel the
 other. VM variants run one at a time to limit resource use on the self-hosted Mac;
-matrix scheduling does not guarantee an image order. The required checks
-`Podman on Linux` and `VM on macOS` each require both image variants to pass.
+matrix scheduling does not guarantee an image order. The result checks
+`Podman on Linux`, `Docker on Linux`, and `VM on macOS` each require both image
+variants to pass.
 See [calling these workflows from another repository](.github/workflows/README.md)
 for inputs and a complete caller example.
 

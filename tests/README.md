@@ -6,7 +6,7 @@ and host platform combinations:
 | Runtime (`--runtime`) | macOS | Linux | Windows |
 | --- | --- | --- | --- |
 | Podman (`podman`) | — | Yes | — |
-| Docker (`docker`) | — | — | — |
+| Docker (`docker`) | — | Yes | — |
 | Apple container (`container`) | — | — | — |
 | VM (`vm`) | Yes | — | — |
 

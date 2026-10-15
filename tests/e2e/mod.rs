@@ -298,8 +298,8 @@ impl Scenario {
         )?;
         let driver = env::var("E2E_DRIVER")?;
         require(
-            matches!(driver.as_str(), "podman" | "vm"),
-            "E2E_DRIVER must be podman or vm",
+            matches!(driver.as_str(), "podman" | "docker" | "vm"),
+            "E2E_DRIVER must be podman, docker, or vm",
         )?;
         let version = self.cli(&["--version"], "openshell-version", 15, true)?;
         require(
