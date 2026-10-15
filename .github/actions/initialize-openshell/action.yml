@@ -49,7 +49,7 @@ runs:
           echo "E2E_NAME=$E2E_NAME"
           echo "E2E_IMAGE=$E2E_IMAGE"
         } >> "$GITHUB_ENV"
-        # Apply isolated XDG paths only to OpenShell, preserving Podman's store.
+        # Apply isolated XDG paths only to OpenShell, preserving the builder's image store.
         cat > "$E2E_DIR/osenv" <<'SH'
         #!/bin/bash
         set -euo pipefail

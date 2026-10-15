@@ -12,8 +12,9 @@ share that live state.
 
 The caller owns runner selection, approval environments, dependencies, release
 assets, checksum tool, driver signing, image builds, driver configuration,
-runtime diagnostics and resource cleanup. The shared actions have no VM/Podman
-branches. `.github/workflows/e2e.yml` shows the complete Podman and VM callers.
+runtime diagnostics and resource cleanup. The shared actions have no
+driver-specific branches. `.github/workflows/e2e.yml` shows the complete
+Podman, Docker, and VM callers.
 The self-hosted VM job retains `environment: integration`; configure its required
 reviewers in the caller repository before enabling it.
 
@@ -36,10 +37,10 @@ variant also removes its downloaded build rootfs and, after upload, its diagnost
 directory. The build-rootfs job runs once and supplies the same artifact to both
 VM variants.
 
-Two small result jobs preserve the required-check names `Podman on Linux` and
-`VM on macOS`. They run with `if: always()` and require the corresponding matrix
-result to be `success`; failed, cancelled or skipped variants cannot pass the
-required check.
+Three small result jobs provide the check names `Podman on Linux`, `Docker on
+Linux`, and `VM on macOS`. They run with `if: always()` and require the
+corresponding matrix result to be `success`; failed, cancelled or skipped
+variants cannot pass the check.
 
 The builder selects root for its build steps, and the copied Containerfile is at
 `/root/Containerfile` in the resulting image. Sandbox runtime identity must still
