@@ -14,33 +14,38 @@ The caller owns runner selection, approval environments, dependencies, release
 assets, checksum tool, driver signing, image builds, driver configuration,
 runtime diagnostics and resource cleanup. The shared actions have no
 driver-specific branches. `.github/workflows/e2e.yml` shows the complete
-Podman, Docker, and VM callers.
-The self-hosted VM job retains `environment: integration`; configure its required
-reviewers in the caller repository before enabling it.
+Podman, Docker, Apple container, and VM callers. The two self-hosted macOS jobs
+retain `environment: integration`; configure its required reviewers in the caller
+repository before enabling them. Apple container must be installed with a default
+kernel and its service running on that runner.
 
 ## Alpine E2E image selection
 
-Each driver matrix lists a short `name` for job and artifact labels and a
+Each E2E matrix lists a short `name` for job and artifact labels and a
 digest-pinned `image` reference passed directly to the builder through
 `E2E_BASE_IMAGE`. The Alpine entry selects `docker.io/alpine/curl:8.22.0`. It includes
 Linux AMD64 and ARM64 variants, Alpine, `/bin/sh`, `/bin/sleep`, `/usr/bin/curl`,
 and CA certificates under `/etc`.
-Each driver job uses an Ubuntu/Alpine matrix with `fail-fast: false`, so both
+Each E2E job uses an Ubuntu/Alpine matrix with `fail-fast: false`, so both
 variants run even if one fails. Each variant installs OpenShell, builds the image
 builder and gets a fresh gateway, sandbox, policy state and temporary directory.
-Diagnostics are stored separately
-under `target/e2e/<driver>/<image>` and uploaded as `e2e-<driver>-<image>`.
+Diagnostics are stored separately under `target/e2e/<runtime>/<image>` and
+uploaded as `e2e-<runtime>-<image>`.
 Cleanup runs after each variant even on failure, including its OpenShell
 installation. The VM matrix uses `max-parallel: 1` to limit resource use on the
 self-hosted runner, without guaranteeing Ubuntu/Alpine execution order. Each VM
 variant also removes its downloaded build rootfs and, after upload, its diagnostic
 directory. The build-rootfs job runs once and supplies the same artifact to both
-VM variants.
+VM variants. The Apple container matrix also uses `max-parallel: 1`. It builds
+through Apple's `container` CLI, exports the resulting image as a flat rootfs
+archive, and hands that archive to the OpenShell VM driver. Apple container
+materializes the exportable rootfs on first run, so the job starts and stops
+the image before exporting it. It does not need the build VM rootfs artifact.
 
-Three small result jobs provide the check names `Podman on Linux`, `Docker on
-Linux`, and `VM on macOS`. They run with `if: always()` and require the
-corresponding matrix result to be `success`; failed, cancelled or skipped
-variants cannot pass the check.
+Four small result jobs provide the check names `Podman on Linux`, `Docker on
+Linux`, `Apple container on macOS`, and `VM on macOS`. They run with
+`if: always()` and require the corresponding matrix result to be `success`;
+failed, cancelled or skipped variants cannot pass the check.
 
 The builder selects root for its build steps, and the copied Containerfile is at
 `/root/Containerfile` in the resulting image. Sandbox runtime identity must still

@@ -540,6 +540,189 @@ jobs:
         if: "always()"
         run: rm -rf -- "$E2E_ARTIFACTS"
 
+  container:
+    name: "Apple container on macOS (${{ matrix.name }})"
+    # Apple's container CLI and the OpenShell VM driver both need a physical Mac.
+    runs-on: ["self-hosted", "macos", "arm64"]
+    timeout-minutes: 30
+    environment: "integration"
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: "ubuntu"
+            # buildpack-deps:noble-curl; multi-architecture manifest.
+            image: "docker.io/library/buildpack-deps@sha256:48a80dfb7e2f2d1e93dbfff934fd2f187f306eef36cb5359ef8bba0ffe9205b3"
+          - name: "alpine"
+            # alpine/curl:8.22.0; multi-architecture manifest.
+            image: "docker.io/alpine/curl@sha256:3f21f10cf24835f7baae20931f18640cc30915ea4151363fe4d8fb59ee296dfb"
+    env:
+      E2E_BASE_IMAGE: "${{ matrix.image }}"
+      E2E_DRIVER: "vm"
+      E2E_ARTIFACTS: "target/e2e/container/${{ matrix.name }}"
+    steps:
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1 stable
+        with:
+          toolchain: "stable"
+
+      - name: "Set VM driver environment"
+        run: |
+          PREFIX=$(brew --prefix)
+          echo "DYLD_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "$PREFIX/opt/e2fsprogs/sbin" >> "$GITHUB_PATH"
+          echo "$PREFIX/opt/openssl@3/bin" >> "$GITHUB_PATH"
+          echo "E2E_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+
+      - name: "Check Apple container and VM prerequisites"
+        run: |
+          test "$(sysctl -n kern.hv_support)" = 1
+          pkg-config --exists libkrun
+          command -v mke2fs
+          command -v debugfs
+          command -v jq
+          command -v container
+          container system status
+
+      - name: "Build image builder"
+        run: "cargo build --locked"
+
+      - name: "Check E2E assertion guards"
+        run: "cargo test --locked --test e2e_test"
+
+      - name: "Initialize isolated E2E state"
+        uses: ./.github/actions/initialize-openshell
+        with:
+          driver: "vm"
+          artifacts: "${{ env.E2E_ARTIFACTS }}"
+          library-path: "${{ env.E2E_LIBRARY_PATH }}"
+
+      - name: "Install checksum-verified OpenShell"
+        id: "openshell"
+        timeout-minutes: 8
+        uses: ./.github/actions/install-openshell
+        with:
+          platform: "macos-arm64"
+          directory: "${{ env.E2E_DIR }}/bin"
+          checksum-command: "shasum -a 256 --check"
+
+      - name: "Set expected OpenShell version"
+        env:
+          VERSION: "${{ steps.openshell.outputs.version }}"
+        run: echo "E2E_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: "Sign the OpenShell VM driver"
+        run: |
+          codesign --sign - --force --entitlements entitlements.plist "$E2E_DIR/bin/openshell-driver-vm"
+
+      - name: "Build and export the Apple container image"
+        timeout-minutes: 20
+        run: |
+          touch "$E2E_DIR/image-build-started"
+          (cd "$E2E_DIR"; "$GITHUB_WORKSPACE/target/debug/openshell-build-image" \
+            --runtime container --from "$E2E_BASE_IMAGE" --copy-containerfile -v "$E2E_IMAGE") \
+            > "$E2E_ARTIFACTS/image-build.log" 2>&1
+          touch "$E2E_DIR/image-check-started"
+          # Export needs a rootfs.ext4, which Apple container creates on first run.
+          container run --name "$E2E_NAME-image-check" --entrypoint /bin/sh \
+            "$E2E_IMAGE" -c 'test -f /root/Containerfile'
+          container export --output "$E2E_DIR/image.tar" "$E2E_NAME-image-check"
+          tar -tf "$E2E_DIR/image.tar" > "$E2E_ARTIFACTS/image-contents.log"
+          containerfile=$(grep -E '^([.]/)?root/Containerfile$' "$E2E_ARTIFACTS/image-contents.log")
+          test -n "$containerfile"
+          tar -xOf "$E2E_DIR/image.tar" "$containerfile" > "$E2E_ARTIFACTS/Containerfile"
+          grep -Fx "FROM $E2E_BASE_IMAGE AS system" "$E2E_ARTIFACTS/Containerfile"
+          echo "E2E_SOURCE=$E2E_DIR/image.tar" >> "$GITHUB_ENV"
+
+      - name: "Configure the vm driver"
+        run: |
+          cat > "$E2E_DIR/driver.toml" <<EOF
+          allow_driver_config = true
+          driver_dir = "$E2E_DIR/bin"
+          state_dir = "$E2E_DIR/vm"
+          bootstrap_image = "$E2E_BOOTSTRAP_IMAGE"
+          overlay_disk_mib = 4096
+          sandbox_uid = 10001
+          sandbox_gid = 10001
+          EOF
+
+      - name: "Start the OpenShell gateway"
+        timeout-minutes: 3
+        uses: ./.github/actions/start-openshell-gateway
+        with:
+          driver-settings: "${{ env.E2E_DIR }}/driver.toml"
+
+      - name: "Create the sandbox from the exported rootfs"
+        timeout-minutes: 6
+        uses: ./.github/actions/create-openshell-sandbox
+        with:
+          image: "${{ env.E2E_SOURCE }}"
+          policy: "tests/e2e/policy.yaml"
+
+      - name: "Verify blocked and approved curl requests"
+        timeout-minutes: 5
+        run: "cargo test --locked --test e2e_test network_policy -- --ignored --nocapture --test-threads=1"
+
+      - name: "Collect OpenShell runtime diagnostics"
+        if: "always()"
+        timeout-minutes: 2
+        uses: ./.github/actions/collect-openshell-diagnostics
+
+      - name: "Collect vm runtime diagnostics"
+        if: "always()"
+        timeout-minutes: 2
+        run: |
+          if [ -z "${E2E_DIR:-}" ] || [ ! -d "$E2E_DIR" ]; then exit 0; fi
+          if [ -d "$E2E_DIR/vm" ]; then
+            # Copy logs before deletion removes them; leave keys and disks private.
+            find "$E2E_DIR/vm" -type f -name '*.log' -print0 | while IFS= read -r -d '' logfile; do
+              relative="${logfile#"$E2E_DIR/vm/"}"
+              destination="$E2E_ARTIFACTS/vm/$relative"
+              mkdir -p "$(dirname "$destination")"
+              cp "$logfile" "$destination"
+            done
+          fi
+
+      - name: "Delete sandbox and stop owned processes"
+        if: "always()"
+        timeout-minutes: 3
+        uses: ./.github/actions/stop-openshell
+
+      - name: "Remove Apple container and VM test resources"
+        if: "always()"
+        timeout-minutes: 3
+        run: |
+          if [ -z "${E2E_DIR:-}" ] || [ ! -d "$E2E_DIR" ]; then exit 0; fi
+          failed=0
+          if [ -f "$E2E_DIR/image-check-started" ] && container inspect "$E2E_NAME-image-check" > /dev/null 2>&1; then
+            container rm --force "$E2E_NAME-image-check" || failed=1
+          fi
+          if [ -f "$E2E_DIR/image-build-started" ] && container image inspect "$E2E_IMAGE" > /dev/null 2>&1; then
+            container image rm --force "$E2E_IMAGE" || failed=1
+          fi
+          rm -rf "$E2E_DIR"
+          exit "$failed"
+
+      - name: "Upload diagnostics"
+        if: "always()"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: "e2e-container-${{ matrix.name }}"
+          path: "${{ env.E2E_ARTIFACTS }}"
+          if-no-files-found: "ignore"
+          retention-days: 7
+
+      - name: "Remove Apple container diagnostics from the runner"
+        if: "always()"
+        run: rm -rf -- "$E2E_ARTIFACTS"
+
   # Stable required-check names cover both image variants, including failures or skips.
   podman-check:
     name: "Podman on Linux"
@@ -561,6 +744,17 @@ jobs:
       - name: "Require both Docker image variants to pass"
         env:
           RESULT: "${{ needs.docker.result }}"
+        run: test "$RESULT" = success
+
+  container-check:
+    name: "Apple container on macOS"
+    runs-on: "ubuntu-26.04"
+    needs: "container"
+    if: "always()"
+    steps:
+      - name: "Require both Apple container image variants to pass"
+        env:
+          RESULT: "${{ needs.container.result }}"
         run: test "$RESULT" = success
 
   vm-check:
