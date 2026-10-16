@@ -22,8 +22,10 @@ if [[ $# -ne 2 || ! $1 =~ ^[0-9a-f]{40}$ ]]; then
   exit 2
 fi
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
+: "${GITHUB_ACTOR:?GITHUB_ACTOR is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+command -v skopeo > /dev/null || { echo "skopeo is required" >&2; exit 1; }
 
 source_sha=$1
 local_prefix=$2
@@ -45,28 +47,11 @@ for fixture in single-amd64 single-arm64 platforms platforms-libc; do
       ;;
     platforms)
       source_image="$local_prefix-platforms:fixture"
-      podman manifest inspect "$source_image" \
-        | jq -e '
-            (.manifests | length) == 2 and
-            (all(.manifests[]; (.annotations // {}) == {})) and
-            ([.manifests[] | [.platform.os, .platform.architecture]] | sort) ==
-              [["linux", "amd64"], ["linux", "arm64"]]
-          ' > /dev/null
       image_name=ghcr.io/openkaiden/tests/addon-platforms
       tag=$source_sha
       ;;
     platforms-libc)
       source_image="$local_prefix-platforms-libc:fixture"
-      podman manifest inspect "$source_image" \
-        | jq -e --arg key ai.openkaiden.openshell-build-image.libc '
-            (.manifests | length) == 4 and
-            ([.manifests[] |
-              [.platform.os, .platform.architecture, .annotations[$key]]] | sort) ==
-              [["linux", "amd64", "glibc"],
-               ["linux", "amd64", "musl"],
-               ["linux", "arm64", "glibc"],
-               ["linux", "arm64", "musl"]]
-          ' > /dev/null
       image_name=ghcr.io/openkaiden/tests/addon-platforms-libc
       tag=$source_sha
       ;;
@@ -82,7 +67,10 @@ for fixture in single-amd64 single-arm64 platforms platforms-libc; do
       --digestfile "$digestfile" "$source_image" "docker://$destination_ref"
   fi
   digest=$(cat "$digestfile")
-  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "invalid digest returned for $fixture: $digest" >&2
+    exit 1
+  fi
   published_ref="docker://$image_name@$digest"
   skopeo inspect --authfile "$authfile" --raw "$published_ref" \
     > "$work_dir/$fixture.published.json"

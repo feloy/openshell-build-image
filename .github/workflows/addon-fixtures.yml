@@ -17,6 +17,13 @@
 name: Publish addon fixtures
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/addon-fixtures.yml
+      - tests/e2e/addons/Containerfile
+      - tests/e2e/addons/build.sh
+      - tests/e2e/addons/verify.sh
+      - tests/e2e/addons/publish.sh
   push:
     branches:
       - main
@@ -24,20 +31,62 @@ on:
       - .github/workflows/addon-fixtures.yml
       - tests/e2e/addons/Containerfile
       - tests/e2e/addons/build.sh
+      - tests/e2e/addons/verify.sh
       - tests/e2e/addons/publish.sh
 
 permissions:
   contents: read
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      LOCAL_IMAGE_PREFIX: localhost/osbi-addon-fixture-${{ github.run_id }}
+    steps:
+      - name: Check out proposed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Podman
+        uses: redhat-actions/podman-install@4a134a65f7324b2d03498c672cd4c6bce93e94b5 # v1.1.1
+        with:
+          start-service: 'false'
+
+      - name: Install rootless Podman dependencies and jq
+        run: sudo apt-get install -y uidmap fuse-overlayfs slirp4netns jq
+
+      - name: Configure rootless Podman
+        run: |
+          if ! grep -q "^${USER}:" /etc/subuid; then
+            sudo usermod --add-subuids 100000-165535 "$USER"
+          fi
+          if ! grep -q "^${USER}:" /etc/subgid; then
+            sudo usermod --add-subgids 100000-165535 "$USER"
+          fi
+          runtime_dir="/run/user/$(id -u)"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$runtime_dir"
+          echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
+      - name: Build addon fixtures
+        run: bash tests/e2e/addons/build.sh "$LOCAL_IMAGE_PREFIX"
+
+      - name: Verify local fixture indexes
+        run: bash tests/e2e/addons/verify.sh "$LOCAL_IMAGE_PREFIX"
+
   publish:
-    if: github.repository == 'openkaiden/openshell-build-image'
+    if: github.event_name == 'push' && github.repository == 'openkaiden/openshell-build-image' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
     env:
       LOCAL_IMAGE_PREFIX: localhost/osbi-addon-fixture-${{ github.run_id }}
@@ -70,11 +119,21 @@ jobs:
       - name: Build addon fixtures
         run: bash tests/e2e/addons/build.sh "$LOCAL_IMAGE_PREFIX"
 
+      - name: Verify local fixture indexes
+        run: bash tests/e2e/addons/verify.sh "$LOCAL_IMAGE_PREFIX"
+
       - name: Publish and verify fixture images
         id: images
         env:
           GHCR_TOKEN: ${{ github.token }}
         run: bash tests/e2e/addons/publish.sh "$GITHUB_SHA" "$LOCAL_IMAGE_PREFIX"
+
+      - name: Log in to GitHub Container Registry for attestations
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Attest single AMD64 fixture
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
