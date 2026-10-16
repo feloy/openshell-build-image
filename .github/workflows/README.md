@@ -146,3 +146,25 @@ Consumers download the named artifact after a `needs` dependency on the rootfs
 job. Preserve the source commit and artifact name when connecting a producer
 to a consumer. Sharing the definition removes duplicated YAML; each workflow
 run still performs its own build.
+
+## Published addon fixtures
+
+`addon-fixtures.yml` builds and verifies the OCI addon fixtures on pull requests
+that change fixture sources or the workflow. It publishes them only after those
+changes land on `main`. The publish job builds the variants with Podman, verifies
+the local indexes, pushes the images to GHCR using full commit SHA tags, verifies
+the published manifests, and attests their digests. A failed `main` run can be
+rerun without another commit.
+
+| Fixture | GHCR tag |
+| --- | --- |
+| `single-amd64` | `ghcr.io/openkaiden/tests/addon-single:amd64-<main SHA>` |
+| `single-arm64` | `ghcr.io/openkaiden/tests/addon-single:arm64-<main SHA>` |
+| `platforms` | `ghcr.io/openkaiden/tests/addon-platforms:<main SHA>` |
+| `platforms-libc` | `ghcr.io/openkaiden/tests/addon-platforms-libc:<main SHA>` |
+
+Use the digest references in the workflow summary for E2E tests. The
+`platforms` index has no libc annotations; `platforms-libc` has glibc and musl
+descriptors for both Linux architectures. A fork's `main` workflow cannot
+publish to the `openkaiden` packages. After their first publication, make the
+three GHCR packages public so all E2E runners can pull them.
