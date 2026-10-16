@@ -10,6 +10,28 @@ images, sockets and background processes remain available to subsequent steps.
 Separate reusable workflow jobs would run on separate runners and could not
 share that live state.
 
+## Published addon fixtures
+
+`addon-fixtures.yml` builds and publishes the three OCI addon test fixtures
+only after a fixture source or the workflow changes on `main`. The job checks
+out the merged commit, builds the variants with Podman, validates both index
+shapes, and pushes the images directly to GHCR with tags based on the full
+commit SHA. It verifies the published manifests and attests their digests in
+the same build workflow. Pull requests do not publish fixture images.
+
+| Fixture | GHCR tag |
+| --- | --- |
+| `single-amd64` | `ghcr.io/openkaiden/tests/addon-single:amd64-<main SHA>` |
+| `single-arm64` | `ghcr.io/openkaiden/tests/addon-single:arm64-<main SHA>` |
+| `platforms` | `ghcr.io/openkaiden/tests/addon-platforms:<main SHA>` |
+| `platforms-libc` | `ghcr.io/openkaiden/tests/addon-platforms-libc:<main SHA>` |
+
+Use the digest references in the workflow summary for E2E tests. The
+`platforms` index has no libc annotations; `platforms-libc` has glibc and musl
+descriptors for both Linux architectures. A fork's `main` workflow cannot
+publish to the `openkaiden` packages. After their first publication, make the
+three GHCR packages public so all E2E runners can pull them.
+
 The caller owns runner selection, approval environments, dependencies, release
 assets, checksum tool, driver signing, image builds, driver configuration,
 runtime diagnostics and resource cleanup. The shared actions have no
