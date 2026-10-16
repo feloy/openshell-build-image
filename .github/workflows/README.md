@@ -10,6 +10,26 @@ images, sockets and background processes remain available to subsequent steps.
 Separate reusable workflow jobs would run on separate runners and could not
 share that live state.
 
+## PR addon fixture publisher
+
+`addon-fixtures-pr-publish.yml` is the trusted half of the addon fixture PR
+build. It runs after a successful pull-request workflow named `Build addon
+fixtures` from `.github/workflows/addon-fixtures.yml`. That read-only build
+workflow must upload four OCI layout artifacts, each with an image named `pr`:
+
+| Artifact | Published preview package | Tag |
+| --- | --- | --- |
+| `oci-addon-single-amd64` | `ghcr.io/openkaiden/tests/addon-single/pr` | `amd64-<PR head SHA>` |
+| `oci-addon-single-arm64` | `ghcr.io/openkaiden/tests/addon-single/pr` | `arm64-<PR head SHA>` |
+| `oci-addon-platforms` | `ghcr.io/openkaiden/tests/addon-platforms/pr` | `<PR head SHA>` |
+| `oci-addon-platforms-libc` | `ghcr.io/openkaiden/tests/addon-platforms-libc/pr` | `<PR head SHA>` |
+
+The publisher validates the OCI shape before pushing and checks the published
+manifest afterward. It reads PR artifacts as data and never checks out PR
+source. GitHub only runs the `workflow_run` publisher after its workflow file
+exists on the default branch, so the PR that introduces it cannot publish its
+own previews.
+
 The caller owns runner selection, approval environments, dependencies, release
 assets, checksum tool, driver signing, image builds, driver configuration,
 runtime diagnostics and resource cleanup. The shared actions have no
