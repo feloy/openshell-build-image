@@ -19,6 +19,15 @@ retain `environment: integration`; configure its required reviewers in the calle
 repository before enabling them. Apple container must be installed with a default
 kernel and its service running on that runner.
 
+## Updating the OpenShell E2E release
+
+Run the `Update OpenShell E2E version` workflow from the Actions tab and enter
+the OpenShell release version without the leading `v`. The workflow verifies
+that the release exists, reads the official CLI and gateway checksum manifests,
+updates the E2E release manifest, and opens a pull request. The resulting pull
+request runs the normal checks before the version is changed on the default
+branch.
+
 ## Alpine E2E image selection
 
 Each E2E matrix lists a short `name` for job and artifact labels and a
