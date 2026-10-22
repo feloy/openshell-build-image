@@ -1,0 +1,163 @@
+# Copyright (C) 2026 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Update OpenShell E2E version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: OpenShell release version without the leading v (for example, 0.1.4)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: true
+
+      - name: Validate the release and generate the E2E manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must be a stable semantic version without a leading v: $VERSION" >&2
+            exit 1
+          fi
+
+          release_tag=$(gh api "repos/NVIDIA/OpenShell/releases/tags/v$VERSION" --jq '.tag_name')
+          test "$release_tag" = "v$VERSION"
+
+          cli_checksums="$RUNNER_TEMP/openshell-checksums-sha256.txt"
+          gateway_checksums="$RUNNER_TEMP/openshell-gateway-checksums-sha256.txt"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 180 \
+            "https://github.com/NVIDIA/OpenShell/releases/download/v$VERSION/openshell-checksums-sha256.txt" \
+            --output "$cli_checksums"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 180 \
+            "https://github.com/NVIDIA/OpenShell/releases/download/v$VERSION/openshell-gateway-checksums-sha256.txt" \
+            --output "$gateway_checksums"
+
+          checksum() {
+            local filename="$1"
+            local manifest="$2"
+            awk -v filename="$filename" '
+              $2 == filename { checksum = $1; matches++ }
+              END {
+                if (matches != 1) {
+                  exit 1
+                }
+                print checksum
+              }
+            ' "$manifest"
+          }
+
+          linux_cli_file="openshell-x86_64-unknown-linux-musl.tar.gz"
+          linux_gateway_file="openshell-gateway-x86_64-unknown-linux-gnu.tar.gz"
+          macos_cli_file="openshell-aarch64-apple-darwin.tar.gz"
+          macos_gateway_file="openshell-gateway-aarch64-apple-darwin.tar.gz"
+          macos_driver_file="openshell-driver-vm-aarch64-apple-darwin.tar.gz"
+
+          linux_cli_sha=$(checksum "$linux_cli_file" "$cli_checksums")
+          linux_gateway_sha=$(checksum "$linux_gateway_file" "$gateway_checksums")
+          macos_cli_sha=$(checksum "$macos_cli_file" "$cli_checksums")
+          macos_gateway_sha=$(checksum "$macos_gateway_file" "$gateway_checksums")
+          macos_driver_sha=$(checksum "$macos_driver_file" "$cli_checksums")
+
+          manifest=".github/actions/install-openshell/release.json"
+          jq -n \
+            --arg license 'Copyright (C) 2026 Red Hat, Inc. SPDX-License-Identifier: Apache-2.0' \
+            --arg version "$VERSION" \
+            --arg linux_cli_sha "$linux_cli_sha" \
+            --arg linux_gateway_sha "$linux_gateway_sha" \
+            --arg macos_cli_sha "$macos_cli_sha" \
+            --arg macos_gateway_sha "$macos_gateway_sha" \
+            --arg macos_driver_sha "$macos_driver_sha" \
+            '{
+              "_license": $license,
+              "version": $version,
+              "platforms": {
+                "linux-x86_64": [
+                  {
+                    "asset": "openshell-x86_64-unknown-linux-musl",
+                    "binary": "openshell",
+                    "sha256": $linux_cli_sha
+                  },
+                  {
+                    "asset": "openshell-gateway-x86_64-unknown-linux-gnu",
+                    "binary": "openshell-gateway",
+                    "sha256": $linux_gateway_sha
+                  }
+                ],
+                "macos-arm64": [
+                  {
+                    "asset": "openshell-aarch64-apple-darwin",
+                    "binary": "openshell",
+                    "sha256": $macos_cli_sha
+                  },
+                  {
+                    "asset": "openshell-gateway-aarch64-apple-darwin",
+                    "binary": "openshell-gateway",
+                    "sha256": $macos_gateway_sha
+                  },
+                  {
+                    "asset": "openshell-driver-vm-aarch64-apple-darwin",
+                    "binary": "openshell-driver-vm",
+                    "sha256": $macos_driver_sha
+                  }
+                ]
+              }
+            }' > "$RUNNER_TEMP/release.json"
+          mv "$RUNNER_TEMP/release.json" "$manifest"
+
+      - name: Create the update pull request
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          if git diff --quiet -- .github/actions/install-openshell/release.json; then
+            echo "OpenShell v$VERSION is already configured for E2E tests"
+            exit 0
+          fi
+
+          branch="ci/update-openshell-e2e-v$VERSION-$GITHUB_RUN_ID"
+          git switch --create "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/actions/install-openshell/release.json
+          git commit --message "test: use OpenShell v$VERSION for E2E tests"
+          git push --set-upstream origin "$branch"
+
+          gh pr create \
+            --base "$DEFAULT_BRANCH" \
+            --head "$branch" \
+            --title "test: use OpenShell v$VERSION for E2E tests" \
+            --body "Update the E2E OpenShell release manifest to v$VERSION using the checksums published with the official release. Generated by the Update OpenShell E2E version workflow."

@@ -118,10 +118,11 @@ Base-image configuration files, `--config`, `OPENSHELL_BUILD_IMAGE_CONFIG`, and 
 ## End-to-end tests with OpenShell
 
 The `OpenShell E2E` workflow builds an image with this tool, starts an isolated
-OpenShell **v0.1.4** gateway, and creates a sandbox from the result. It covers
-Podman and Docker on Linux x86_64 and the VM driver on a self-hosted Apple
-Silicon Mac. Each Linux job builds and launches the image through the same
-container engine.
+OpenShell gateway using the release configured in the
+[E2E release manifest](.github/actions/install-openshell/release.json), and
+creates a sandbox from the result. It covers Podman and Docker on Linux x86_64
+and the VM driver on a self-hosted Apple Silicon Mac. Each Linux job builds and
+launches the image through the same container engine.
 
 Each driver job uses an image matrix covering the digest-pinned Ubuntu-based
 `buildpack-deps:noble-curl` and Alpine-based `alpine/curl:8.22.0` images.
